@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+requests
+beautifulsoup4
+lxml
+extruct
+w3lib
+playwright
+axe-playwright-python
+cssutils
+nltk
+weasyprint
+fpdf2
+resend
