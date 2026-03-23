@@ -1,10 +1,10 @@
-# WAIO Webflow Audit Tool - 9-Pillar Deterministic Analysis
+# WAIO Webflow Audit Tool - 10-Pillar Deterministic Analysis
 
 The **WAIO Webflow Audit Tool** is a high-performance programmatic engine designed to perform evidence-based technical audits of Webflow websites. Unlike general SEO tools, it relies on deterministic rules and W3C/Schema standards to provide a clear, zero-hallucination health score.
 
-## The 9 Audit Pillars
+## The 10 Audit Pillars
 
-The tool now performs a comprehensive analysis across 9 specialized categories:
+The tool now performs a comprehensive analysis across 10 specialized categories:
 
 1.  **Semantic HTML**: W3C-standard structure validation and heading hierarchy.
 2.  **Structured Data**: JSON-LD & Microdata integrity (Schema.org).
@@ -15,6 +15,7 @@ The tool now performs a comprehensive analysis across 9 specialized categories:
 7.  **RAG Readiness**: Chunking and context quality for LLM/RAG integration.
 8.  **Agentic Protocols**: Verification of `llms.txt`, `robots.txt`, and MCP/A2A readiness.
 9.  **Data Integrity**: Conflict detection and data-integrity issues in the DOM.
+10. **Internal Linking**: Analysis of site-wide internal link structure, dead links, and orphan pages.
 
 ---
 
@@ -68,8 +69,8 @@ The tool now performs a comprehensive analysis across 9 specialized categories:
 
 ## Project Structure
 
--   `/backend`: API logic, reporting engines, and the 9 specialized auditor modules.
--   `/frontend`: React components, including the 9-pillar dashboard and deterministic loading state.
+-   `/backend`: API logic, reporting engines, and the 10 specialized auditor modules.
+-   `/frontend`: React components, including the 10-pillar dashboard and deterministic loading state.
 -   `/waio_webflow_audit_tool_master_prompt_v1.2.md`: The updated master architecture and prompt log.
 
 ---
