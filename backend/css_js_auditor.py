@@ -51,29 +51,61 @@ def check_framework_detection(soup: BeautifulSoup) -> Dict[str, Any]:
     for el in soup.find_all(class_=True):
         classes.extend(el['class'])
         
-    classes = list(set(classes))[:200] # get max 200 unique classes
+    unique_classes = list(set(classes))[:500]
+    total = len(unique_classes)
     
-    cf_matches = sum(1 for c in classes if '_' in c and '-' in c and len(c) > 15)
-    mast_matches = sum(1 for c in classes if c.startswith('grid-col-') or c.startswith('flex-') or c.startswith('mast-'))
-    lumos_matches = sum(1 for c in classes if c.startswith('u-') or c.startswith('c-') or c.startswith('l-') or c.startswith('is-') or 'lumos' in c.lower())
-    sml_matches = sum(1 for c in classes if c.endswith('-xl') or c.endswith('-l') or c.endswith('-m') or c.endswith('-s') or c.endswith('-xs') or c.startswith('sml-'))
-    
-    framework = "No Framework / Custom"
-    if len(classes) > 0:
-        ratios = {
-            "Client-First": cf_matches / len(classes),
-            "MAST": mast_matches / len(classes),
-            "Lumos": lumos_matches / len(classes),
-            "SML": sml_matches / len(classes)
+    if total < 30:
+        return {
+            "status": "info",
+            "details": {"detected_framework": "Insufficient data", "class_count": total}
         }
-        
-        best_framework = max(ratios, key=ratios.get)
-        if ratios[best_framework] > 0.2: # Using 20% threshold to be more inclusive
-            framework = best_framework
-            
+    
+    cf_patterns = sum(1 for c in unique_classes if '_' in c and not c.startswith(('u-', 'c-', 'l-', 'is-', 'w-')))
+    
+    lumos_prefixes = ('u-', 'c-', 'l-', 'is-')
+    lumos_patterns = sum(1 for c in unique_classes if any(c.startswith(p) for p in lumos_prefixes))
+    
+    mast_prefixes = ('grid-col-', 'flex-', 'mast-', 'layout-')
+    mast_patterns = sum(1 for c in unique_classes if any(c.startswith(p) for p in mast_prefixes))
+    
+    sml_suffixes = ('-xl', '-l', '-m', '-s', '-xs')
+    sml_patterns = sum(1 for c in unique_classes if any(c.endswith(s) for s in sml_suffixes))
+    
+    waio_prefixes = ('section-', 'component-', 'waio-', 'layout-', 'utility-')
+    waio_patterns = sum(1 for c in unique_classes if any(c.startswith(p) for p in waio_prefixes))
+    
+    ratios = {
+        "Client-First": cf_patterns / total,
+        "Lumos": lumos_patterns / total,
+        "MAST": mast_patterns / total,
+        "SML": sml_patterns / total,
+        "WAIO": waio_patterns / total,
+    }
+    
+    best_framework = max(ratios, key=ratios.get)
+    best_ratio = ratios[best_framework]
+    
+    matching_counts = {
+        "Client-First": cf_patterns,
+        "Lumos": lumos_patterns,
+        "MAST": mast_patterns,
+        "SML": sml_patterns,
+        "WAIO": waio_patterns,
+    }
+    
+    if best_ratio >= 0.25 and matching_counts[best_framework] >= 10:
+        framework = best_framework
+    else:
+        framework = "No Framework / Custom"
+    
     return {
         "status": "info",
-        "details": {"detected_framework": framework, "class_count": len(classes)}
+        "details": {
+            "detected_framework": framework,
+            "class_count": total,
+            "match_ratios": {k: round(v, 3) for k, v in ratios.items()},
+            "confidence": "high" if best_ratio >= 0.4 else "medium" if best_ratio >= 0.25 else "low"
+        }
     }
 
 def check_naming_consistency(soup: BeautifulSoup, framework: str) -> Dict[str, Any]:

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowRight, Shield, Code2, FileJson, Accessibility, Paintbrush, BookOpen, Layers, Radio, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Shield, Code2, FileJson, Accessibility, Paintbrush, BookOpen, Layers, Radio, ShieldCheck, Link2, Plus } from 'lucide-react';
 
 interface AuditFormProps {
-  onRunAudit: (url: string) => void;
+  onRunAudit: (url: string, auditType: 'single' | 'site' | 'competitive', competitorUrls?: string[]) => void;
   isLoading: boolean;
   error: string | null;
 }
@@ -18,10 +18,13 @@ const pillars = [
   { icon: Layers, label: 'RAG Readiness', desc: 'Chunk & context quality' },
   { icon: Radio, label: 'Agentic Protocols', desc: 'MCP/A2A readiness' },
   { icon: ShieldCheck, label: 'Data Integrity', desc: 'Conflict detection' },
+  { icon: Link2, label: 'Internal Linking', desc: 'Link depth & distribution' },
 ];
 
 export const AuditForm: React.FC<AuditFormProps> = ({ onRunAudit, isLoading, error }) => {
   const [url, setUrl] = useState('');
+  const [auditType, setAuditType] = useState<'single' | 'site' | 'competitive'>('single');
+  const [competitors, setCompetitors] = useState<string[]>(['']);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,7 +33,28 @@ export const AuditForm: React.FC<AuditFormProps> = ({ onRunAudit, isLoading, err
     if (!submitUrl.startsWith('http://') && !submitUrl.startsWith('https://')) {
       submitUrl = 'https://' + submitUrl;
     }
-    onRunAudit(submitUrl);
+    
+    const competitorUrls = auditType === 'competitive' 
+      ? competitors.filter(c => c.trim()).map(c => c.trim().startsWith('http') ? c.trim() : 'https://' + c.trim())
+      : [];
+
+    onRunAudit(submitUrl, auditType, competitorUrls);
+  };
+
+  const addCompetitor = () => {
+    if (competitors.length < 4) {
+      setCompetitors([...competitors, '']);
+    }
+  };
+
+  const removeCompetitor = (index: number) => {
+    setCompetitors(competitors.filter((_, i) => i !== index));
+  };
+
+  const updateCompetitor = (index: number, value: string) => {
+    const newCompetitors = [...competitors];
+    newCompetitors[index] = value;
+    setCompetitors(newCompetitors);
   };
 
   return (
@@ -51,7 +75,7 @@ export const AuditForm: React.FC<AuditFormProps> = ({ onRunAudit, isLoading, err
           <div className="inline-flex items-center gap-2 bg-surface-secondary border border-border rounded-full px-4 py-1.5 mb-8">
             <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
             <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-              9-Pillar Deterministic Analysis
+              10-Pillar Deterministic Analysis
             </span>
           </div>
 
@@ -78,24 +102,122 @@ export const AuditForm: React.FC<AuditFormProps> = ({ onRunAudit, isLoading, err
             onSubmit={handleSubmit}
             className="relative max-w-2xl mx-auto"
           >
-            <div className="relative bg-white rounded-2xl border border-gray-200 shadow-[0_4px_24px_rgba(0,0,0,0.06)] p-2 flex items-center gap-2 transition-shadow hover:shadow-[0_8px_32px_rgba(40,32,255,0.08)] focus-within:shadow-[0_8px_32px_rgba(40,32,255,0.12)] focus-within:border-primary/20">
-              <input
-                type="text"
-                className="flex-1 bg-transparent px-4 py-3.5 text-base font-medium text-text-primary placeholder:text-text-muted focus:outline-none"
-                placeholder="Enter your Webflow site URL..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                disabled={isLoading}
-                required
-              />
-              <button
-                type="submit"
-                disabled={isLoading || !url}
-                className="bg-primary hover:bg-primary-hover text-white font-semibold px-6 py-3.5 rounded-xl flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-              >
-                Run Audit
-                <ArrowRight size={16} />
-              </button>
+            <div className="flex justify-center mb-6">
+              <div className="bg-surface-secondary border border-border p-1 rounded-xl flex gap-1 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setAuditType('single')}
+                  className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    auditType === 'single'
+                      ? 'bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-border-light text-text-primary'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Single Page
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditType('site')}
+                  className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    auditType === 'site'
+                      ? 'bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-border-light text-text-primary'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Full Site
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditType('competitive')}
+                  className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    auditType === 'competitive'
+                      ? 'bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-border-light text-text-primary'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Competitive
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="relative bg-white rounded-2xl border border-gray-200 shadow-[0_4px_24px_rgba(0,0,0,0.06)] p-2 flex items-center gap-2 transition-shadow hover:shadow-[0_8px_32px_rgba(40,32,255,0.08)] focus-within:shadow-[0_8px_32px_rgba(40,32,255,0.12)] focus-within:border-primary/20">
+                <div className="pl-4 text-xs font-bold text-primary uppercase tracking-wider whitespace-nowrap">Primary</div>
+                <input
+                  type="text"
+                  className="flex-1 bg-transparent px-2 py-3.5 text-base font-medium text-text-primary placeholder:text-text-muted focus:outline-none"
+                  placeholder="Enter primary Webflow URL..."
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  disabled={isLoading}
+                  required
+                />
+                {!isLoading && auditType !== 'competitive' && (
+                  <button
+                    type="submit"
+                    disabled={!url}
+                    className="bg-primary hover:bg-primary-hover text-white font-semibold px-6 py-3.5 rounded-xl flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    Run Audit
+                    <ArrowRight size={16} />
+                  </button>
+                )}
+              </div>
+
+              {auditType === 'competitive' && (
+                <div className="space-y-3 mt-4">
+                  <div className="text-left px-2">
+                    <span className="text-xs font-bold text-text-muted uppercase tracking-widest">Competitors (max 4)</span>
+                  </div>
+                  {competitors.map((comp, idx) => (
+                    <motion.div
+                      key={idx}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="relative bg-white/60 backdrop-blur-sm rounded-xl border border-border-light p-1.5 flex items-center gap-2"
+                    >
+                      <input
+                        type="text"
+                        className="flex-1 bg-transparent px-3 py-2 text-sm font-medium text-text-primary placeholder:text-text-muted focus:outline-none"
+                        placeholder="Competitor URL..."
+                        value={comp}
+                        onChange={(e) => updateCompetitor(idx, e.target.value)}
+                        disabled={isLoading}
+                      />
+                      {competitors.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeCompetitor(idx)}
+                          className="p-2 text-text-muted hover:text-severity-critical transition-colors"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                        </button>
+                      )}
+                    </motion.div>
+                  ))}
+                  
+                  <div className="flex gap-2 pt-2">
+                    {competitors.length < 4 && (
+                      <button
+                        type="button"
+                        onClick={addCompetitor}
+                        className="text-xs font-bold text-primary hover:text-primary-hover flex items-center gap-1 px-2 py-1 transition-colors"
+                      >
+                        <Plus size={14} /> Add Competitor
+                      </button>
+                    )}
+                    <div className="flex-1" />
+                    <button
+                      type="submit"
+                      disabled={isLoading || !url}
+                      className="bg-primary hover:bg-primary-hover text-white font-semibold px-8 py-3 rounded-xl flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_8px_16px_rgba(40,32,255,0.2)] hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      Compare AI-Readiness
+                      <ArrowRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </form>
 

@@ -13,6 +13,7 @@ const steps = [
   { label: 'Checking RAG & chunking readiness', duration: 2500 },
   { label: 'Verifying agentic protocols (llms.txt, robots.txt)', duration: 2500 },
   { label: 'Detecting data conflicts & integrity issues', duration: 2500 },
+  { label: 'Analyzing internal linking structure', duration: 3000 },
   { label: 'Compiling audit report', duration: 2000 },
 ];
 

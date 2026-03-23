@@ -75,6 +75,9 @@ def generate_pdf(report: dict) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=22)
     pdf.add_page()
 
+    if report.get("is_competitive"):
+        return _generate_competitive_pdf(report, pdf)
+
     url = report.get("url", "Unknown")
     timestamp = report.get("audit_timestamp", "")
     try:
@@ -249,5 +252,119 @@ def generate_pdf(report: dict) -> bytes:
             pdf.ln(4)
 
         pdf.ln(2)
+
+    return pdf.output()
+
+
+def _generate_competitive_pdf(report: dict, pdf: AuditPDF) -> bytes:
+    """Generate a competitive benchmarking PDF layout."""
+    primary_url = report.get("primary_url", "Unknown")
+    rankings = report.get("rankings", [])
+    pillar_averages = report.get("pillar_averages", {})
+    pillar_labels = report.get("pillar_labels", {})
+    advantages = report.get("advantages", [])
+    weaknesses = report.get("weaknesses", [])
+    primary = report.get("primary", {})
+
+    # -- Header info --
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(26, 26, 46)
+    pdf.cell(0, 8, "Competitive AI-Readiness Benchmark", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(156, 163, 175)
+    pdf.cell(0, 5, _safe(f"Primary Domain: {primary_url}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 5, _safe(f"Rank: #{primary.get('rank', 1)} of {len(rankings)}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(8)
+
+    # -- Rankings Table --
+    _section_header(pdf, "Market Leaderboard")
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_fill_color(243, 244, 246)
+    pdf.cell(15, 8, "Rank", border=1, fill=True, align="C")
+    pdf.cell(110, 8, "Domain", border=1, fill=True)
+    pdf.cell(30, 8, "Score", border=1, fill=True, align="C")
+    pdf.cell(31, 8, "Rating", border=1, fill=True, align="C", new_x="LMARGIN", new_y="NEXT")
+
+    for r in rankings:
+        is_primary = r['url'] == primary_url
+        pdf.set_font("Helvetica", "B" if is_primary else "", 8)
+        pdf.set_text_color(67, 56, 202) if is_primary else pdf.set_text_color(55, 65, 81)
+        
+        url_disp = r['url'].replace('https://', '').replace('http://', '')
+        if is_primary: url_disp += " (YOUR SITE)"
+        
+        label = r.get("overall_label", "N/A")
+        color = _score_color(label)
+        
+        pdf.cell(15, 8, str(r['rank']), border=1, align="C")
+        pdf.cell(110, 8, _safe(url_disp), border=1)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(*color)
+        pdf.cell(30, 8, str(r['overall_score']), border=1, align="C")
+        pdf.set_font("Helvetica", "", 7)
+        pdf.cell(31, 8, _safe(label.upper()), border=1, align="C", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(10)
+
+    # -- Advantages & Weaknesses --
+    y_before = pdf.get_y()
+    
+    # Advantages Box
+    pdf.set_fill_color(240, 253, 244)
+    pdf.rect(12, y_before, 91, 45, 'F')
+    pdf.set_xy(15, y_before + 3)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(21, 128, 61)
+    pdf.cell(85, 6, "COMPETITIVE ADVANTAGES", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(55, 65, 81)
+    if advantages:
+        for adv in advantages[:4]:
+            pdf.cell(0, 5, _safe(f"- {adv['pillar']}: +{adv['diff']} vs avg"), new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.cell(0, 5, "No significant advantages detected.", new_x="LMARGIN", new_y="NEXT")
+
+    # Weaknesses Box
+    pdf.set_fill_color(254, 242, 242)
+    pdf.rect(107, y_before, 91, 45, 'F')
+    pdf.set_xy(110, y_before + 3)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(185, 28, 28)
+    pdf.cell(85, 6, "CRITICAL GAPS", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(55, 65, 81)
+    if weaknesses:
+        for weak in weaknesses[:4]:
+            pdf.cell(0, 5, _safe(f"- {weak['pillar']}: {weak['diff']} vs avg"), new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.cell(0, 5, "No critical gaps relative to competitors.", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_y(y_before + 52)
+
+    # -- Pillar Comparison Table --
+    _section_header(pdf, "Detailed Pillar Benchmarking")
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.set_fill_color(243, 244, 246)
+    
+    col_w = 186 / (len(rankings) + 2)
+    pdf.cell(col_w * 1.5, 8, "Pillar", border=1, fill=True)
+    for r in rankings:
+        url_short = r['url'].replace('https://', '').replace('http://', '')[:10]
+        pdf.cell(col_w, 8, _safe(url_short), border=1, fill=True, align="C")
+    pdf.cell(col_w, 8, "Average", border=1, fill=True, align="C", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_font("Helvetica", "", 7)
+    for key, label in pillar_labels.items():
+        pdf.cell(col_w * 1.5, 7, _safe(label), border=1)
+        for r in rankings:
+            is_primary = r['url'] == primary_url
+            score = r['pillar_scores'].get(key, 0)
+            if is_primary:
+                pdf.set_font("Helvetica", "B", 7)
+                pdf.set_text_color(67, 56, 202)
+            pdf.cell(col_w, 7, str(score), border=1, align="C")
+            pdf.set_font("Helvetica", "", 7)
+            pdf.set_text_color(55, 65, 81)
+        pdf.cell(col_w, 7, str(pillar_averages.get(key, 0)), border=1, align="C", new_x="LMARGIN", new_y="NEXT")
 
     return pdf.output()

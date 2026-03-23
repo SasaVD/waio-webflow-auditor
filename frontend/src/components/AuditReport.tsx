@@ -3,12 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, ExternalLink, FileCode, FileJson, Paintbrush, Zap, Accessibility,
   AlertTriangle, AlertCircle, XCircle, Info, CheckCircle2, ChevronDown, ChevronUp,
-  BookOpen, Layers, Radio, ShieldCheck, Download, Mail, FileText, Loader2, X
+  BookOpen, Layers, Radio, ShieldCheck, Download, Mail, FileText, Loader2, X, Link2
 } from 'lucide-react';
 
 interface ReportProps {
   report: any;
   onNewAudit: () => void;
+  onViewHistory?: () => void;
 }
 
 /* ─── Color Helpers ─── */
@@ -46,10 +47,11 @@ const pillarMeta: Record<string, { icon: any; label: string }> = {
   rag_readiness: { icon: Layers, label: 'RAG Readiness' },
   agentic_protocols: { icon: Radio, label: 'Agentic Protocols' },
   data_integrity: { icon: ShieldCheck, label: 'Data Integrity' },
+  internal_linking: { icon: Link2, label: 'Internal Linking' },
 };
 
 /* ─── Main Report Component ─── */
-export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit }) => {
+export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewHistory }) => {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [mdLoading, setMdLoading] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -191,6 +193,15 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit }) => {
                 <ArrowLeft size={16} />
                 New Audit
               </button>
+              {onViewHistory && (
+                <button
+                  onClick={onViewHistory}
+                  className="flex items-center gap-2 bg-surface-secondary hover:bg-gray-200 border border-border text-text-primary font-semibold px-4 py-2.5 rounded-xl transition-all text-sm"
+                >
+                  <Layers size={14} />
+                  View History
+                </button>
+              )}
             </div>
           </div>
 

@@ -1,19 +1,37 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 def calculate_score(findings: list[Dict[str, Any]]) -> int:
-    score = 100
-    for finding in findings:
-        sev = finding.get('severity', 'medium')
-        if sev == 'critical': score -= 15
-        elif sev == 'high': score -= 8
-        elif sev == 'medium': score -= 3
-    return max(0, score)
+    score = 100.0
+    
+    criticals = [f for f in findings if f.get('severity') == 'critical']
+    highs = [f for f in findings if f.get('severity') == 'high']
+    mediums = [f for f in findings if f.get('severity') == 'medium']
+    
+    for i, _ in enumerate(criticals):
+        score -= max(5.0, 18.0 - (i * 4.0))
+    
+    for i, _ in enumerate(highs):
+        score -= max(3.0, 10.0 - (i * 2.0))
+    
+    for i, _ in enumerate(mediums):
+        score -= max(1.0, 4.0 - (i * 0.5))
+    
+    medium_total = sum(max(1.0, 4.0 - (i * 0.5)) for i in range(len(mediums)))
+    if medium_total > 20:
+        score = 100.0
+        for i, _ in enumerate(criticals):
+            score -= max(5.0, 18.0 - (i * 4.0))
+        for i, _ in enumerate(highs):
+            score -= max(3.0, 10.0 - (i * 2.0))
+        score -= min(20.0, medium_total)
+    
+    return max(0, int(round(score)))
 
 def get_label(score: int) -> str:
     if score >= 90: return "Excellent"
-    if score >= 70: return "Good"
-    if score >= 50: return "Needs Improvement"
-    if score >= 30: return "Poor"
+    if score >= 75: return "Good"
+    if score >= 55: return "Needs Improvement"
+    if score >= 35: return "Poor"
     return "Critical"
 
 def compile_scores(
@@ -24,8 +42,11 @@ def compile_scores(
     a11y_res: dict,
     rag_res: dict,
     agent_res: dict,
-    data_res: dict
+    data_res: dict,
+    internal_linking_res: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
+    if internal_linking_res is None:
+        internal_linking_res = {}
     
     html_score = calculate_score(html_res.get("findings", []))
     sd_score = calculate_score(sd_res.get("findings", []))
@@ -35,8 +56,7 @@ def compile_scores(
     rag_score = calculate_score(rag_res.get("findings", []))
     agent_score = calculate_score(agent_res.get("findings", []))
     data_score = calculate_score(data_res.get("findings", []))
-    
-    # 5.10 Scoring Model
+    il_score = calculate_score(internal_linking_res.get("findings", []))
     # Semantic HTML (20%), Structured Data (20%), AEO Content (15%), CSS Quality (5%), JavaScript Bloat (5%), Accessibility (35%)
     
     # Actually wait, css_js_res contains BOTH css findings and js findings.
@@ -60,7 +80,7 @@ def compile_scores(
     css_score = calculate_score(css_findings)
     js_score = calculate_score(js_findings)
     
-    overall = (html_score * 0.15) + (sd_score * 0.15) + (aeo_score * 0.10) + (css_score * 0.05) + (js_score * 0.05) + (a11y_score * 0.20) + (rag_score * 0.10) + (agent_score * 0.10) + (data_score * 0.10)
+    overall = (html_score * 0.12) + (sd_score * 0.12) + (aeo_score * 0.10) + (css_score * 0.05) + (js_score * 0.05) + (a11y_score * 0.18) + (rag_score * 0.10) + (agent_score * 0.08) + (data_score * 0.08) + (il_score * 0.12)
     overall = int(round(overall))
     
     # Replace single css_js finding list with split if needed for report generator.
@@ -79,7 +99,8 @@ def compile_scores(
             "accessibility": a11y_score,
             "rag_readiness": rag_score,
             "agentic_protocols": agent_score,
-            "data_integrity": data_score
+            "data_integrity": data_score,
+            "internal_linking": il_score
         },
         "labels": {
             "semantic_html": get_label(html_score),
@@ -90,6 +111,7 @@ def compile_scores(
             "accessibility": get_label(a11y_score),
             "rag_readiness": get_label(rag_score),
             "agentic_protocols": get_label(agent_score),
-            "data_integrity": get_label(data_score)
+            "data_integrity": get_label(data_score),
+            "internal_linking": get_label(il_score)
         }
     }
