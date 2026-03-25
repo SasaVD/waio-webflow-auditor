@@ -13,6 +13,7 @@ WORKDIR /app
 # Set environment variables for non-interactive builds
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Install essential system tools
 RUN apt-get update && apt-get install -y \
