@@ -14,7 +14,7 @@ References:
 - BrightEdge AI Citation Research (2026): https://www.brightedge.com/resources/research-reports
 """
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, Tag  # type: ignore
 import re
 import math
 from typing import Dict, Any, List
@@ -29,6 +29,7 @@ def run_aeo_content_audit(soup: BeautifulSoup, html_content: str) -> Dict[str, A
     checks["readability"] = check_readability(soup)
     checks["section_length"] = check_section_length(soup)
     checks["citations_statistics"] = check_citations_statistics(soup)
+    checks["conclusion_first"] = check_conclusion_first(soup)
     checks["question_answer_patterns"] = check_qa_patterns(soup)
     checks["content_freshness_signals"] = check_freshness_signals(soup, html_content)
     checks["list_definition_patterns"] = check_list_definition_patterns(soup)
@@ -37,7 +38,7 @@ def run_aeo_content_audit(soup: BeautifulSoup, html_content: str) -> Dict[str, A
         if check_val.get("status") in ["pass", "info"]:
             if "positive_message" in check_val:
                 positive_findings.append(check_val["positive_message"])
-                del check_val["positive_message"]
+                check_val.pop("positive_message", None)
         if "findings" in check_val:
             category_findings.extend(check_val["findings"])
 
@@ -70,20 +71,76 @@ def _get_visible_text(soup: BeautifulSoup) -> str:
     return container.get_text(separator=" ", strip=True)
 
 
+def _get_text_sections(soup: BeautifulSoup) -> List[Dict[str, Any]]:
+    """
+    Extract logical content sections from the page.
+    A section is defined as a heading element followed by its content
+    until the next heading of the same or higher level.
+    """
+    sections = []
+    body = soup.find('body')
+    if not body:
+        return sections
+
+    headings = body.find_all(re.compile(r'^h[1-6]$'))
+
+    if not headings:
+        # No headings: treat entire body text as one section
+        text = body.get_text(separator=' ', strip=True)
+        if text:
+            sections.append({
+                "heading": None,
+                "heading_level": 0,
+                "text": text,
+                "word_count": len(text.split())
+            })
+        return sections
+
+    for i, heading in enumerate(headings):
+        heading_text = heading.get_text(strip=True)
+        heading_level = int(heading.name[1])
+
+        # Collect text between this heading and the next heading
+        content_parts = []
+        sibling = heading.next_sibling
+        while sibling:
+            if isinstance(sibling, Tag):
+                if sibling.name and re.match(r'^h[1-6]$', str(sibling.name)):  # type: ignore
+                    break
+                # Also check if the sibling contains a heading
+                inner_heading = sibling.find(re.compile(r'^h[1-6]$'))  # type: ignore
+                if inner_heading:
+                    break
+                content_parts.append(sibling.get_text(separator=' ', strip=True))  # type: ignore
+            sibling = sibling.next_sibling
+
+        section_text = ' '.join(content_parts).strip()
+        word_count = len(section_text.split()) if section_text else 0
+
+        sections.append({
+            "heading": heading_text,
+            "heading_level": heading_level,
+            "text": section_text,
+            "word_count": word_count
+        })
+
+    return sections
+
+
 def _count_syllables(word: str) -> int:
     word = word.lower().strip()
     if len(word) <= 3:
         return 1
     vowels = "aeiouy"
-    count = 0
+    count: int = 0
     prev_vowel = False
     for char in word:
         is_vowel = char in vowels
         if is_vowel and not prev_vowel:
-            count += 1
+            count = count + 1  # type: ignore
         prev_vowel = is_vowel
     if word.endswith("e") and count > 1:
-        count -= 1
+        count = count - 1  # type: ignore
     return max(1, count)
 
 
@@ -113,7 +170,7 @@ def check_readability(soup: BeautifulSoup) -> Dict[str, Any]:
     avg_syllables_per_word = total_syllables / max(1, word_count)
 
     grade_level = 0.39 * avg_words_per_sentence + 11.8 * avg_syllables_per_word - 15.59
-    grade_level = round(max(0, grade_level), 1)
+    grade_level = round(max(0.0, float(grade_level)), 1)  # type: ignore
 
     findings = []
 
@@ -253,16 +310,16 @@ def check_citations_statistics(soup: BeautifulSoup) -> Dict[str, Any]:
             "high",
             f"Very few statistics or citations found ({total}).",
             "Include more data points, statistics, and verifiable citations in your content.",
-            "https://arxiv.org/abs/2311.09735",
-            "Content containing citations, statistics, and quotations achieves 30-40% higher visibility in AI responses (Princeton GEO Research)."
+            "https://www.yotpo.com/blog/llm-optimization-guide/",
+            "Citing sources increases AI citation likelihood by +115%, while adding statistics provides a +37% boost (Princeton GEO Study, 2023). This signals to the AI that your content is well-researched and trustworthy."
         ))
     elif total < 3:
         findings.append(create_finding(
             "medium",
             f"Only {total} statistics or citations found. More would strengthen AI citation likelihood.",
             "Add verifiable data points, named sources, and statistics throughout the content.",
-            "https://arxiv.org/abs/2311.09735",
-            "Content containing citations, statistics, and quotations achieves 30-40% higher visibility in AI responses (Princeton GEO Research)."
+            "https://www.yotpo.com/blog/llm-optimization-guide/",
+            "Citing sources increases AI citation likelihood by +115%, while adding statistics provides a +37% boost (Princeton GEO Study, 2023). This signals to the AI that your content is well-researched and trustworthy."
         ))
 
     if not findings:
@@ -284,11 +341,11 @@ def check_qa_patterns(soup: BeautifulSoup) -> Dict[str, Any]:
         return {"status": "info", "findings": []}
 
     headings = soup.find_all(re.compile(r'^h[2-6]$'))
-    question_headings = 0
+    question_headings: int = 0
     for h in headings:
         h_text = h.get_text(strip=True)
         if h_text.endswith("?") or h_text.lower().startswith(("what ", "how ", "why ", "when ", "where ", "who ", "which ", "can ", "does ", "is ", "are ")):
-            question_headings += 1
+            question_headings = question_headings + 1  # type: ignore
 
     faq_schema = '"@type"' in str(soup) and '"FAQPage"' in str(soup)
 
@@ -394,7 +451,44 @@ def check_list_definition_patterns(soup: BeautifulSoup) -> Dict[str, Any]:
             "findings": []
         }
 
-    return {
-        "status": "fail",
-        "findings": findings
-    }
+    return {"status": "fail", "findings": findings}
+
+
+def check_conclusion_first(soup: BeautifulSoup) -> Dict[str, Any]:
+    sections = _get_text_sections(soup)
+    findings = []
+    introductory_phrases = [
+        r"^(In this section|In this article|In this post|This section will|Let's explore|Let's look at)",
+        r"^(There are many|There are several|A number of)",
+        r"^(When it comes to|Regarding|In terms of)"
+    ]
+
+    conclusion_first_count: int = 0
+    for s in sections:
+        text = s.get("text", "").strip()
+        if not text or s["word_count"] < 20:
+            continue
+
+        first_sentence = text.split(".")[0]
+        is_intro = any(re.match(p, first_sentence, re.IGNORECASE) for p in introductory_phrases)
+
+        if not is_intro:
+            conclusion_first_count = conclusion_first_count + 1  # type: ignore
+
+    if len(sections) > 0 and (float(conclusion_first_count) / len(sections)) < 0.5:
+        findings.append(create_finding(
+            "medium",
+            f"Only {conclusion_first_count} of {len(sections)} sections use Conclusion-First formatting.",
+            "Rewrite section openings to provide the direct answer in the first sentence. This improves information density for AI retrieval.",
+            "https://keomarketing.com/query-fan-out-b2b-seo-strategy/",
+            "AI models prioritize content with high information density. Providing the answer upfront in the first sentence of a section increases the likelihood of citation."
+        ))
+
+    if not findings:
+        return {
+            "status": "pass",
+            "positive_message": "Content sections effectively use Conclusion-First formatting, optimizing for AI information retrieval.",
+            "findings": []
+        }
+
+    return {"status": "fail", "findings": findings}

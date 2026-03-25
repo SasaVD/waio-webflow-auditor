@@ -60,8 +60,8 @@ async def create_job(job_id: str):
 
 async def update_job_progress(job_id: str, status: Optional[str] = None, total: Optional[int] = None, completed: Optional[int] = None, final_report: Optional[dict] = None):
     async with aiosqlite.connect(DB_PATH) as db:
-        updates = []
-        params = []
+        updates: List[str] = []
+        params: List[Any] = []
         if status is not None:
             updates.append("status = ?")
             params.append(status)
@@ -160,7 +160,8 @@ async def create_schedule(url: str, email: str, frequency: str, max_pages: int) 
             (url, email, frequency, max_pages, now)
         )
         await db.commit()
-        return cursor.lastrowid or 0
+        last_row_id = cursor.lastrowid or 0
+    return last_row_id
 
 async def get_schedules() -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
