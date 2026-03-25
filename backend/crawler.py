@@ -14,6 +14,7 @@ async def init_browser():
     global _playwright, _browser
     if not _playwright:
         _playwright = await async_playwright().start()
+    if not _browser:
         _browser = await _playwright.chromium.launch(headless=True)
 
 async def close_browser():
