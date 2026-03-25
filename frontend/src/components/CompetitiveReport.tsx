@@ -191,7 +191,7 @@ export const CompetitiveReport: React.FC<CompetitiveReportProps> = ({ report, on
                   <div className="flex flex-col gap-2">
                     {/* Clustered Bars */}
                     <div className="flex flex-col gap-1.5">
-                      {rankings.map((r: any, idx: number) => (
+                      {rankings.map((r: any) => (
                         <div key={r.url} className="flex items-center gap-3">
                           <div className="flex-1 h-3 bg-gray-50 rounded-full overflow-hidden relative">
                             <motion.div
