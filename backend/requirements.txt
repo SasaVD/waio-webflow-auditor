@@ -9,7 +9,6 @@ playwright
 axe-playwright-python
 cssutils
 nltk
-weasyprint
 fpdf2
 resend
 aiosqlite
