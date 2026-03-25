@@ -33,3 +33,8 @@ ms-playwright/
 # Test artifacts
 backend/audit_result.json
 backend/test_audit.py
+test.pdf
+
+# Pyre
+.pyre/
+backend/.pyre/

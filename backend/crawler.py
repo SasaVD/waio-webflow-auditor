@@ -47,8 +47,9 @@ async def fetch_page(url: str) -> Tuple[str, BeautifulSoup]:
     falls back to rendering via Playwright to ensure all JS is executed.
     """
     try:
-        # Wrap the synchronous requests.get call in a thread to keep the loop free
-        html_content = await asyncio.to_thread(fetch_url, url)
+        # Use run_in_executor for better typing compatibility with some type checkers
+        loop = asyncio.get_running_loop()
+        html_content = await loop.run_in_executor(None, fetch_url, url)
     except Exception as e:
         logger.error(f"HTTP attempt failed for {url}: {e}")
         raise ValueError(f"Failed to fetch {url}: {str(e)}")
@@ -69,17 +70,19 @@ async def fetch_page_with_playwright(url: str) -> str:
     if not browser:
         raise ValueError("Critical error: Playwright browser could not be initialized.")
         
-    # Create a new context for isolation (cookies, cache)
     context = await browser.new_context(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
     )
-    page = await context.new_page()
+    html_content = ""
     try:
+        page = await context.new_page()
         await page.goto(url, wait_until="networkidle", timeout=15000)
         html_content = await page.content()
-        return html_content
     except Exception as e:
         logger.error(f"Playwright attempt failed for {url}: {e}")
-        raise ValueError(f"Failed to fetch {url} via Playwright: {e}")
+        # Ensure we re-raise to satisfy type checker and propagate the error
+        raise ValueError(f"Failed to fetch {url} via Playwright: {e}") from e
     finally:
         await context.close()
+
+    return html_content
