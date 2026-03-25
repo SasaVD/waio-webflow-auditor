@@ -1,5 +1,5 @@
 # Stage 1: Build Frontend
-FROM node:18-slim AS frontend-builder
+FROM node:22-slim AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm install
@@ -10,24 +10,12 @@ RUN npm run build
 FROM python:3.10-slim
 WORKDIR /app
 
-# Install system dependencies for Playwright
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    libgconf-2-4 \
-    libnss3 \
-    libxss1 \
-    libasound2 \
-    fonts-liberation \
-    libappindicator3-1 \
-    xdg-utils \
-    && rm -rf /var/lib/apt/lists/*
-
 # Install Python dependencies
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "import nltk; nltk.download('punkt_tab')"
 
+# Install Playwright and all its browser dependencies
 RUN playwright install chromium
 RUN playwright install-deps
 
@@ -38,7 +26,7 @@ COPY backend/ ./backend/
 COPY --from=frontend-builder /app/frontend/dist ./backend/static
 
 # Set entrypoint
-ENV PORT 8000
+ENV PORT=8000
 EXPOSE 8000
 WORKDIR /app/backend
 CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
