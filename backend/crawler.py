@@ -47,10 +47,11 @@ async def fetch_page(url: str) -> Tuple[str, BeautifulSoup]:
     falls back to rendering via Playwright to ensure all JS is executed.
     """
     try:
+        # Wrap the synchronous requests.get call in a thread to keep the loop free
         html_content = await asyncio.to_thread(fetch_url, url)
-    except requests.RequestException as e:
+    except Exception as e:
         logger.error(f"HTTP attempt failed for {url}: {e}")
-        raise ValueError(f"Failed to fetch {url}: {e}")
+        raise ValueError(f"Failed to fetch {url}: {str(e)}")
 
     soup = BeautifulSoup(html_content, 'lxml')
     body = soup.body
@@ -65,6 +66,9 @@ async def fetch_page(url: str) -> Tuple[str, BeautifulSoup]:
 
 async def fetch_page_with_playwright(url: str) -> str:
     browser = await get_browser()
+    if not browser:
+        raise ValueError("Critical error: Playwright browser could not be initialized.")
+        
     # Create a new context for isolation (cookies, cache)
     context = await browser.new_context(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
