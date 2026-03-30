@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "bash(cd backend*)",
+      "bash(cd frontend*)",
+      "bash(python*)",
+      "bash(pip install*)",
+      "bash(npm*)",
+      "bash(node*)",
+      "bash(npx*)",
+      "bash(git*)",
+      "bash(cat*)",
+      "bash(ls*)",
+      "bash(find*)",
+      "bash(grep*)",
+      "bash(docker*)",
+      "bash(curl http://127.0.0.1*)",
+      "bash(playwright*)"
+    ],
+    "deny": [
+      "bash(rm -rf /)*",
+      "bash(sudo*)",
+      "bash(curl*serpapi*)",
+      "bash(curl*dataforseo*)"
+    ]
+  },
+  "model": "opus",
+  "maxThinkingTokens": 32000
+}
