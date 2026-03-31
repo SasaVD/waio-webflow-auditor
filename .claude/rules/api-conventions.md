@@ -20,25 +20,40 @@ POST /api/export/md                 → generate Markdown
 POST /api/send-report               → email PDF report
 ```
 
-### New Endpoints (to add)
+### New Endpoints (added in Sprints 2-4)
 ```
-# Tier system (modify existing)
-POST /api/audit                     → add "tier" field to AuditRequest model
+# Tier system (modifies existing)
+POST /api/audit                     → "tier" field in AuditRequest model
 
-# Premium features
-POST /api/audit/premium             → full premium audit with GSC/GA4/DataForSEO
-GET  /api/audit/link-graph/{id}     → link graph data for D3 visualization
-GET  /api/audit/wdf-idf/{id}        → WDF*IDF gap analysis results
-GET  /api/audit/executive-summary/{id} → generated executive summary
+# Premium features (Sprint 2)
+POST /api/audit/premium             → full premium audit with all integrations
 
-# Webflow fix instructions
+# Webflow fix instructions (Sprint 2B)
 GET  /api/fixes/{finding_pattern}   → curated Webflow fix for a finding type
 GET  /api/fixes                     → list all available fix instructions
 
-# GSC/GA4 OAuth
+# Link intelligence (Sprint 3)
+GET  /api/audit/link-graph/{id}     → link graph data for D3 visualization
+GET  /api/audit/clusters/{id}       → topic cluster data
+
+# CMS detection (Sprint 3F)
+GET  /api/audit/cms/{id}            → CMS detection result for an audit
+
+# GSC/GA4 OAuth (Sprint 3B)
 GET  /api/auth/google               → initiate OAuth flow
 GET  /api/auth/google/callback      → OAuth callback
 GET  /api/auth/google/status        → check if tokens exist for a property
+
+# Content intelligence (Sprint 4)
+GET  /api/audit/wdf-idf/{id}        → WDF*IDF gap analysis results
+GET  /api/audit/interlinking/{id}   → page-pair interlinking opportunities
+GET  /api/audit/content-profile/{id} → content profile and persona
+
+# Migration assessment (Sprint 4E)
+GET  /api/audit/migration/{id}      → CMS migration assessment (NULL for Webflow sites)
+
+# Executive summary (Sprint 2A)
+GET  /api/audit/executive-summary/{id} → generated executive summary
 ```
 
 ## Request/Response Patterns
@@ -54,7 +69,30 @@ class PremiumAuditRequest(BaseModel):
     competitor_urls: list[str] = []
     gsc_property: str | None = None
     target_keyword: str | None = None  # for WDF*IDF
-    max_pages: int = 50
+    max_pages: int = 2000              # default 2,000 pages, max 5,000
+    # CMS is auto-detected — no client input needed
+```
+
+### CMS Detection Response
+```python
+class CMSDetectionResult(BaseModel):
+    platform: str          # "wordpress", "shopify", "webflow", "unknown"
+    version: str | None
+    confidence: float      # 0.0-1.0
+    detection_method: str  # "regex", "wappalyzer", "dns", "combined"
+    technologies: list[str]  # additional detected tech
+```
+
+### Migration Assessment Response (included in report JSON)
+```python
+class MigrationAssessment(BaseModel):
+    source_cms: str                    # detected current CMS
+    target_cms: str = "webflow"        # always Webflow
+    platform_issues: list[dict]        # CMS-specific SEO problems found
+    webflow_advantages: list[dict]     # how Webflow solves each issue
+    redirect_count: int                # unique URLs needing 301 redirects
+    migration_timeline: str            # "small: 2-4 weeks", etc.
+    tco_comparison: dict | None        # total cost of ownership if estimable
 ```
 
 ### Error Handling Pattern
@@ -75,13 +113,10 @@ async def perform_audit(request: AuditRequest):
 ```typescript
 const apiBase = import.meta.env.PROD ? '' : 'http://127.0.0.1:8000';
 ```
-All frontend API calls use this pattern. In production, requests go to same origin.
-In development, they go to localhost:8000.
+All frontend API calls use this pattern.
 
 ## CORS
 Currently allows all origins (`allow_origins=["*"]`). Keep this for now.
-In production SaaS phase, restrict to known domains.
 
 ## Static File Serving
-Backend serves frontend build from `backend/static/`. The catch-all route serves `index.html` for SPA routing.
-API routes are checked first (they start with `/api/`).
+Backend serves frontend build from `backend/static/`. The catch-all route serves `index.html` for SPA routing. API routes are checked first (they start with `/api/`).

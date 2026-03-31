@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-WAIO (Website AI Optimization) Audit Tool by Veza Digital. A 10-pillar deterministic website audit engine for Webflow sites, evolving into a premium $4,500 diagnostic platform with AI-powered enhancements.
+WAIO (Website AI Optimization) Audit Tool by Veza Digital. A 10-pillar deterministic website audit engine that works on any CMS (Webflow, WordPress, Shopify, Next.js, Framer, Wix, Squarespace, and more), with Webflow-specific fix instructions and migration consulting intelligence. Evolving into a premium $4,500 diagnostic platform with AI-powered enhancements.
 
 **Live app:** https://waio.up.railway.app/
 **Repo:** github.com/SasaVD/waio-webflow-auditor
@@ -12,12 +12,13 @@ WAIO (Website AI Optimization) Audit Tool by Veza Digital. A 10-pillar determini
 ## Architecture Rules
 
 - **Keep the existing codebase.** Do NOT rewrite or create a new project. All upgrades build on existing modules.
+- **CMS-agnostic core.** All 10 audit pillars analyze rendered HTML/CSS/JS output, not CMS source code. They work identically on any platform. CMS-specific intelligence is a separate layer on top.
 - **Auditor interface contract:** Every auditor takes `(soup, html_content, url)` or similar, returns `{"checks": {}, "positive_findings": [], "findings": []}`.
 - **Zero AI dependency for core audit pillars.** The 10 deterministic pillars must never call an LLM API. AI features (fix generator, personas) are separate premium layers.
 - **Findings must include:** severity, description, recommendation, reference, credibility_anchor (evidence-based data point from a verified study).
 - **Positive findings matter.** When something is correct, acknowledge it with a credibility anchor.
 
-## Current 10 Pillars
+## Current 10 Pillars (CMS-Agnostic)
 
 1. Semantic HTML (`html_auditor.py`) — 12% weight
 2. Structured Data (`structured_data_auditor.py`) — 12% weight
@@ -33,24 +34,43 @@ WAIO (Website AI Optimization) Audit Tool by Veza Digital. A 10-pillar determini
 ## Two-Tier System
 
 - **Free tier** (`tier: "free"`): Existing 10-pillar analysis, up to 50 pages, PDF/MD export. Lead gen tool.
-- **Premium tier** (`tier: "premium"`): Everything in free + GSC/GA4 integration, DataForSEO crawl, competitor WDF*IDF, link graph visualization, executive summary, Webflow fix instructions.
+- **Premium tier** (`tier: "premium"`): Everything in free + full-site crawl (up to 2,000 pages default, 5,000 max), CMS detection, GSC/GA4 integration, DataForSEO crawl, competitor WDF*IDF, link graph visualization, executive summary, Webflow fix instructions, CMS-specific migration intelligence.
 
 ## API Stack (Premium Tier Only)
 
-- **DataForSEO On-Page API** — site crawling, link graph, orphan detection, 120+ SEO metrics (~$0.63-$2.13/500 pages)
+- **DataForSEO On-Page API** — site crawling, link graph, orphan detection, 120+ SEO metrics (~$2.50/2,000 pages with JS rendering)
 - **DataForSEO SERP API or SerpApi** — competitor URLs for WDF*IDF (~$0.06/audit)
-- **Trafilatura** — clean content extraction from competitor pages (free, in-process, no API key)
+- **Trafilatura** — clean content extraction from any CMS (free, in-process, no API key)
 - **Google Search Console API** — indexed URLs, search performance (free, OAuth required)
 - **Google GA4 Data API** — traffic per URL for orphan prioritization (free, OAuth required)
-- Total API cost per premium audit: ~$1-3
+- Total API cost per premium audit: ~$3-10 (scales with page count)
 
 ## Sprint Plan (see .claude/rules/sprint-plan.md for details)
 
 1. **Sprint 1:** PostgreSQL migration + normalized schema + audit tier system ✅
 2. **Sprint 2:** Executive summary generator + Webflow fix knowledge base + competitor benchmarking ✅
-3. **Sprint 3:** DataForSEO On-Page API + site-wide link graph + D3 network visualization + GSC/GA4 OAuth
-4. **Sprint 4:** Trafilatura content extraction + WDF*IDF pipeline + page-pair interlinking + content profile
+3. **Sprint 3:** DataForSEO On-Page API + CMS detection + site-wide link graph + D3 network visualization + GSC/GA4 OAuth
+4. **Sprint 4:** Trafilatura content extraction + WDF*IDF pipeline + page-pair interlinking + content profile + CMS migration intelligence
 5. **Sprint 5:** Knowledge base generator for RAG (bridge to Phase 2 WAIO Agent)
+
+## Page Limits
+
+- **Free tier:** up to 50 pages (existing `site_crawler.py`)
+- **Premium tier default:** up to 2,000 pages (via DataForSEO)
+- **Premium tier max:** up to 5,000 pages (configurable per audit, higher cost)
+- At $4,500 per audit, even a 5,000-page crawl costs < $22 in API fees (< 0.5% of revenue)
+
+## Supported CMS Platforms
+
+WAIO detects and provides platform-specific intelligence for:
+- **Webflow** — full fix instructions (54 curated entries), migration target platform
+- **WordPress** — security vulnerability analysis, plugin bloat detection, migration recommendations
+- **Shopify** — URL structure limitations, duplicate content patterns, redirect constraints
+- **Next.js** — SSR/SSG detection, hydration issues, routing analysis
+- **Framer** — performance benchmarking, export limitations
+- **Wix** — performance issues, export limitations, SEO constraints
+- **Squarespace** — heading hierarchy limitations, performance gaps, structured data constraints
+- **Other/Custom** — generic audit (all 10 pillars work on any HTML output)
 
 ## Build & Run Commands
 
@@ -80,7 +100,7 @@ git push origin main  # Railway auto-deploys from main branch
 - `backend/db_router.py` — Auto-selects PostgreSQL or SQLite based on DATABASE_URL
 - `backend/db_postgres.py` — Async PostgreSQL module (production)
 - `backend/db.py` — SQLite module (local dev fallback)
-- `backend/site_crawler.py` — Multi-page crawl engine, up to 50 pages
+- `backend/site_crawler.py` — Multi-page crawl engine, up to 50 pages (free tier)
 - `backend/competitive_auditor.py` — Concurrent audit of primary + up to 4 competitors
 - `backend/executive_summary_generator.py` — Template-based executive summary (Sprint 2A)
 - `backend/webflow_fixes.py` — 54 curated Webflow fix instructions (Sprint 2B)
