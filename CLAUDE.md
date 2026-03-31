@@ -35,12 +35,21 @@ WAIO (Website AI Optimization) Audit Tool by Veza Digital. A 10-pillar determini
 - **Free tier** (`tier: "free"`): Existing 10-pillar analysis, up to 50 pages, PDF/MD export. Lead gen tool.
 - **Premium tier** (`tier: "premium"`): Everything in free + GSC/GA4 integration, DataForSEO crawl, competitor WDF*IDF, link graph visualization, executive summary, Webflow fix instructions.
 
-## Sprint Plan (see .claude/rules/ for details)
+## API Stack (Premium Tier Only)
 
-1. **Sprint 1:** PostgreSQL migration + normalized schema + audit tier system
-2. **Sprint 2:** Executive summary generator + Webflow fix knowledge base + competitor benchmarking default
+- **DataForSEO On-Page API** — site crawling, link graph, orphan detection, 120+ SEO metrics (~$0.63-$2.13/500 pages)
+- **DataForSEO SERP API or SerpApi** — competitor URLs for WDF*IDF (~$0.06/audit)
+- **Trafilatura** — clean content extraction from competitor pages (free, in-process, no API key)
+- **Google Search Console API** — indexed URLs, search performance (free, OAuth required)
+- **Google GA4 Data API** — traffic per URL for orphan prioritization (free, OAuth required)
+- Total API cost per premium audit: ~$1-3
+
+## Sprint Plan (see .claude/rules/sprint-plan.md for details)
+
+1. **Sprint 1:** PostgreSQL migration + normalized schema + audit tier system ✅
+2. **Sprint 2:** Executive summary generator + Webflow fix knowledge base + competitor benchmarking ✅
 3. **Sprint 3:** DataForSEO On-Page API + site-wide link graph + D3 network visualization + GSC/GA4 OAuth
-4. **Sprint 4:** WDF*IDF pipeline (SerpApi + content extraction) + page-pair interlinking + content profile
+4. **Sprint 4:** Trafilatura content extraction + WDF*IDF pipeline + page-pair interlinking + content profile
 5. **Sprint 5:** Knowledge base generator for RAG (bridge to Phase 2 WAIO Agent)
 
 ## Build & Run Commands
@@ -68,10 +77,16 @@ git push origin main  # Railway auto-deploys from main branch
 - `backend/main.py` — FastAPI app, all API endpoints, orchestrates auditors
 - `backend/scoring.py` — Weighted scoring model, `compile_scores()` and `calculate_score()`
 - `backend/report_generator.py` — Compiles all auditor results into final JSON report
-- `backend/db.py` — Database layer (currently aiosqlite, migrating to PostgreSQL)
+- `backend/db_router.py` — Auto-selects PostgreSQL or SQLite based on DATABASE_URL
+- `backend/db_postgres.py` — Async PostgreSQL module (production)
+- `backend/db.py` — SQLite module (local dev fallback)
 - `backend/site_crawler.py` — Multi-page crawl engine, up to 50 pages
 - `backend/competitive_auditor.py` — Concurrent audit of primary + up to 4 competitors
+- `backend/executive_summary_generator.py` — Template-based executive summary (Sprint 2A)
+- `backend/webflow_fixes.py` — 54 curated Webflow fix instructions (Sprint 2B)
 - `frontend/src/components/AuditReport.tsx` — Main report UI, pillarMeta registry
+- `frontend/src/components/AuditForm.tsx` — Audit form with premium tier toggle
+- `frontend/src/components/ExecutiveSummary.tsx` — Premium executive summary display
 - `frontend/src/index.css` — Design tokens (@theme block with CSS variables)
 
 ## Code Style

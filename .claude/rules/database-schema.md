@@ -1,22 +1,9 @@
 # Database Schema — PostgreSQL Migration Plan
 
-## Current State (SQLite via aiosqlite)
-The current `db.py` uses SQLite with 4 tables:
-- `jobs` — multi-page crawl job tracking
-- `page_audits` — per-page results stored as JSON blob in `results_json` TEXT column
-- `audit_history` — historical audit scores with `report_json` TEXT column
-- `scheduled_audits` — recurring audit configuration
+## Current State
+Sprint 1 implemented the PostgreSQL migration. `db_router.py` auto-selects Postgres (via `DATABASE_URL`) or SQLite fallback.
 
-## Problem
-JSON blob storage prevents cross-audit querying, benchmarking, and ML training data extraction.
-
-## Target State: PostgreSQL on Railway
-
-### Migration Library
-Use `asyncpg` for async PostgreSQL. Add `asyncpg` and `python-dotenv` to `requirements.txt`.
-Connection via `DATABASE_URL` environment variable (Railway provides this automatically).
-
-### New Schema Design
+## Active Schema
 
 ```sql
 -- Core audit record
@@ -78,12 +65,18 @@ CREATE TABLE page_content (
     title TEXT,
     h1_text TEXT,
     meta_description TEXT,
-    visible_text TEXT,  -- extracted body text (for WDF*IDF)
+    visible_text TEXT,          -- raw extracted body text (from BeautifulSoup get_text)
+    clean_text TEXT,            -- Trafilatura-extracted main content (Sprint 4)
+                                -- boilerplate-free, nav/footer stripped
+                                -- used for WDF*IDF, content profiling, interlinking, RAG export
+                                -- Phase 2 upgrade: replace with Firecrawl markdown for better RAG quality
     word_count INTEGER,
-    heading_structure JSONB,  -- [{level, text}]
-    internal_links JSONB,  -- [{href, anchor_text}]
+    heading_structure JSONB,   -- [{level, text}]
+    internal_links JSONB,      -- [{href, anchor_text}]
     external_links JSONB,
-    schema_types TEXT[],  -- ['Organization', 'WebSite', ...]
+    schema_types TEXT[],       -- ['Organization', 'WebSite', ...]
+    language TEXT,             -- detected language (from Trafilatura metadata)
+    extraction_method TEXT,    -- 'trafilatura' | 'beautifulsoup_fallback' | 'firecrawl' (future)
     UNIQUE(audit_id, url)
 );
 
@@ -104,7 +97,7 @@ CREATE INDEX idx_link_graph_audit ON link_graph(audit_id);
 CREATE INDEX idx_link_graph_source ON link_graph(source_url);
 CREATE INDEX idx_link_graph_target ON link_graph(target_url);
 
--- Jobs (same as current, for multi-page crawl tracking)
+-- Jobs (for multi-page crawl tracking)
 CREATE TABLE jobs (
     job_id TEXT PRIMARY KEY,
     audit_id UUID REFERENCES audits(id),
@@ -114,7 +107,7 @@ CREATE TABLE jobs (
     final_report JSONB
 );
 
--- Scheduled audits (same as current)
+-- Scheduled audits
 CREATE TABLE scheduled_audits (
     id SERIAL PRIMARY KEY,
     url TEXT NOT NULL,
@@ -140,21 +133,21 @@ CREATE TABLE webflow_fixes (
 );
 ```
 
-### Migration Strategy
-1. Add `asyncpg` to requirements.txt
-2. Create new `db_postgres.py` alongside existing `db.py`
-3. Set `DATABASE_URL` env var in Railway (Railway Postgres addon)
-4. Create migration script `migrations/001_initial.sql`
-5. Update `main.py` startup to call new init function
-6. Gradually update endpoints to use new db module
-7. Keep `db.py` (SQLite) as fallback for local dev without Postgres
+## Migration for Sprint 4 (add clean_text columns)
 
-### Environment Variables (add to Railway)
+```sql
+-- migrations/002_content_extraction.sql
+ALTER TABLE page_content ADD COLUMN IF NOT EXISTS clean_text TEXT;
+ALTER TABLE page_content ADD COLUMN IF NOT EXISTS language TEXT;
+ALTER TABLE page_content ADD COLUMN IF NOT EXISTS extraction_method TEXT;
 ```
-DATABASE_URL=postgresql://...  (Railway auto-provides this)
-SERPAPI_KEY=...               (for WDF*IDF, Sprint 4)
-DATAFORSEO_LOGIN=...          (for On-Page API, Sprint 3)
-DATAFORSEO_PASSWORD=...       (for On-Page API, Sprint 3)
-GOOGLE_CLIENT_ID=...          (for GSC/GA4 OAuth, Sprint 3)
-GOOGLE_CLIENT_SECRET=...      (for GSC/GA4 OAuth, Sprint 3)
+
+## Environment Variables (add to Railway)
+```
+DATABASE_URL=postgresql://...      (Railway auto-provides this)
+DATAFORSEO_LOGIN=...               (for On-Page API, Sprint 3)
+DATAFORSEO_PASSWORD=...            (for On-Page API, Sprint 3)
+GOOGLE_CLIENT_ID=...               (for GSC/GA4 OAuth, Sprint 3)
+GOOGLE_CLIENT_SECRET=...           (for GSC/GA4 OAuth, Sprint 3)
+SERPAPI_KEY=...                    (for WDF*IDF SERP data, Sprint 4)
 ```
