@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from db import get_due_schedules, mark_schedule_run, save_audit_history, get_latest_history_score
+from db_router import get_due_schedules, mark_schedule_run, save_audit_history, get_latest_history_score
 from email_sender import send_regression_alert
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ async def run_scheduled_audit(schedule: dict):
             # Multi-page audit
             from site_crawler import run_site_crawl
             import uuid
-            from db import create_job, get_job_status
+            from db_router import create_job, get_job_status
             job_id = str(uuid.uuid4())
             await create_job(job_id)
             await run_site_crawl(job_id, url, max_pages)

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Dict, Any, List, cast, Optional
 
-def generate_report(url: str, html_res: dict, sd_res: dict, aeo_res: dict, css_js_res: dict, a11y_res: dict, rag_res: dict, agent_res: dict, data_res: dict, scores: dict, il_res: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def generate_report(url: str, html_res: dict, sd_res: dict, aeo_res: dict, css_js_res: dict, a11y_res: dict, rag_res: dict, agent_res: dict, data_res: dict, scores: dict, il_res: Optional[Dict[str, Any]] = None, tier: str = "free") -> Dict[str, Any]:
     all_findings: List[Dict[str, Any]] = cast(List[Dict[str, Any]], (
         html_res.get("findings", []) + 
         sd_res.get("findings", []) + 
@@ -93,6 +93,7 @@ def generate_report(url: str, html_res: dict, sd_res: dict, aeo_res: dict, css_j
 
     return {
         "url": url,
+        "tier": tier,
         "audit_timestamp": datetime.now(timezone.utc).isoformat(),
         "overall_score": scores["overall_score"],
         "overall_label": scores["overall_label"],

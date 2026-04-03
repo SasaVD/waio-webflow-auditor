@@ -23,6 +23,7 @@ import re
 import json
 from typing import Dict, Any, List, Set
 from collections import Counter
+from utils import truncate_html, get_css_selector
 
 
 def run_data_integrity_audit(soup: BeautifulSoup, html_content: str) -> Dict[str, Any]:
@@ -159,13 +160,30 @@ def check_price_conflicts(soup: BeautifulSoup, html_content: str) -> Dict[str, A
             schema_currencies.add(sp["priceCurrency"].upper())
 
     if len(currencies_found) > 1:
-        findings.append(create_finding(
+        f = create_finding(
             "high",
             f"Multiple currencies detected in visible text: {', '.join(currencies_found)}.",
             "Standardize all prices to a single currency on each page, or clearly label each price with its currency. Use Schema.org priceCurrency to disambiguate.",
             "https://schema.org/priceCurrency",
             "An AI agent asked about pricing will be confused by mixed currencies and may provide incorrect price comparisons to users."
-        ))
+        )
+        # Find elements containing price text
+        price_els = []
+        if body:
+            currency_re = re.compile(r'[\$€£][\d,]+(?:\.\d{2})?|\d+\s*(?:USD|EUR|GBP|CAD|AUD)')
+            for el in body.find_all(string=currency_re):
+                parent = el.parent
+                if parent and parent.name not in ('script', 'style'):
+                    price_els.append({
+                        "selector": get_css_selector(parent),
+                        "html_snippet": truncate_html(str(parent)),
+                        "location": "page content",
+                    })
+                    if len(price_els) >= 5:
+                        break
+        if price_els:
+            f["elements"] = price_els
+        findings.append(f)
 
     if schema_currencies and currencies_found:
         text_only = currencies_found - schema_currencies
@@ -268,13 +286,28 @@ def check_contact_conflicts(soup: BeautifulSoup, html_content: str) -> Dict[str,
     real_phones = [p for p in phones if len(_normalize_phone(p)) >= 7]
 
     if len(set(_normalize_phone(p) for p in real_phones)) > 3:
-        findings.append(create_finding(
+        f = create_finding(
             "medium",
             f"Found {len(set(_normalize_phone(p) for p in real_phones))} different phone numbers on the page.",
             "If these represent different departments, clearly label each number (e.g., 'Sales: +1-555-0100', 'Support: +1-555-0200'). Ensure the primary contact number is in your Schema.org Organization data.",
             "https://schema.org/telephone",
             "An AI agent asked 'What is the phone number?' will not know which number to provide if multiple unlabeled numbers exist."
-        ))
+        )
+        phone_els = []
+        if body:
+            for el in body.find_all(string=phone_pattern):
+                parent = el.parent
+                if parent and parent.name not in ('script', 'style'):
+                    phone_els.append({
+                        "selector": get_css_selector(parent),
+                        "html_snippet": truncate_html(str(parent)),
+                        "location": "page content",
+                    })
+                    if len(phone_els) >= 5:
+                        break
+        if phone_els:
+            f["elements"] = phone_els
+        findings.append(f)
 
     # Check email consistency
     if schema_emails:

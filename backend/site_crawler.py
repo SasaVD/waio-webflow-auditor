@@ -5,7 +5,7 @@ from typing import Set, List, Dict, Any
 from urllib.parse import urlparse, urljoin
 
 from crawler import fetch_page
-from db import update_job_progress, save_page_audit
+from db_router import update_job_progress, save_page_audit
 
 from html_auditor import run_html_audit
 from structured_data_auditor import run_structured_data_audit

@@ -2,6 +2,7 @@ import extruct  # type: ignore
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup  # type: ignore
 from typing import Dict, Any, List, Optional, cast
+from utils import make_element_entry
 
 def run_structured_data_audit(html_content: str, url: str) -> Dict[str, Any]:
     checks = {}
@@ -358,15 +359,19 @@ def check_microdata_presence(microdata_data: List[Dict], json_ld_data: List[Dict
 def check_microdata_scope_integrity(html_content: str) -> Dict[str, Any]:
     soup = BeautifulSoup(html_content, 'lxml')
     orphans: int = 0
+    orphan_els = []
     props = soup.find_all(attrs={"itemprop": True})
     for prop in props:
         # Check if wrapped in an itemscope
         if not prop.find_parent(attrs={"itemscope": True}) and not prop.has_attr("itemscope"):
             orphans = orphans + 1  # type: ignore
-            
+            orphan_els.append(prop)
+
     findings = []
     if orphans > 0:
-        findings.append(create_finding("critical", f"Found {orphans} orphaned Microdata itemprops.", "Ensure all itemprop attributes are enclosed in an element with itemscope.", "schema.org"))
+        f = create_finding("critical", f"Found {orphans} orphaned Microdata itemprops.", "Ensure all itemprop attributes are enclosed in an element with itemscope.", "schema.org")
+        f["elements"] = [make_element_entry(el) for el in orphan_els[:5]]
+        findings.append(f)
         
     res: Dict[str, Any] = {
         "status": "pass" if not findings else "fail",
@@ -379,15 +384,19 @@ def check_microdata_scope_integrity(html_content: str) -> Dict[str, Any]:
 def check_microdata_itemtype(html_content: str) -> Dict[str, Any]:
     soup = BeautifulSoup(html_content, 'lxml')
     bad_schemas: int = 0
+    bad_els = []
     types = soup.find_all(attrs={"itemtype": True})
     for t in types:
         val = t['itemtype']
-        if not 'schema.org' in val:
+        if 'schema.org' not in val:
              bad_schemas = bad_schemas + 1  # type: ignore
-             
+             bad_els.append(t)
+
     findings = []
     if bad_schemas > 0:
-        findings.append(create_finding("high", f"Found {bad_schemas} malformed itemtype URLs.", "Ensure itemtype uses https://schema.org/Type.", "schema.org"))
+        f = create_finding("high", f"Found {bad_schemas} malformed itemtype URLs.", "Ensure itemtype uses https://schema.org/Type.", "schema.org")
+        f["elements"] = [make_element_entry(el) for el in bad_els[:5]]
+        findings.append(f)
         
     res: Dict[str, Any] = {
         "status": "pass" if not findings else "fail",

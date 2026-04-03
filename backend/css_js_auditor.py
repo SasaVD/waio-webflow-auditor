@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup
 import re
 from typing import Dict, Any, List
+from utils import make_element_entry
 
 def run_css_js_audit(soup: BeautifulSoup, html_content: str) -> Dict[str, Any]:
     checks = {}
@@ -129,11 +130,15 @@ def check_inline_styles(soup: BeautifulSoup) -> Dict[str, Any]:
     inlines = soup.find_all(style=True)
     count = len(inlines)
     findings = []
-    
+
     if count > 30:
-        findings.append(create_finding("high", f"Excessive inline styles detected ({count}).", "Move inline styles to external CSS classes.", "css-best-practices"))
+        f = create_finding("high", f"Excessive inline styles detected ({count}).", "Move inline styles to external CSS classes.", "css-best-practices")
+        f["elements"] = [make_element_entry(el) for el in inlines[:5]]
+        findings.append(f)
     elif count > 10:
-        findings.append(create_finding("medium", f"Many inline styles detected ({count}).", "Move inline styles to external CSS classes.", "css-best-practices"))
+        f = create_finding("medium", f"Many inline styles detected ({count}).", "Move inline styles to external CSS classes.", "css-best-practices")
+        f["elements"] = [make_element_entry(el) for el in inlines[:5]]
+        findings.append(f)
         
     return {
         "status": "pass" if not findings else "fail",
@@ -145,9 +150,11 @@ def check_external_stylesheets(soup: BeautifulSoup) -> Dict[str, Any]:
     stylesheets = soup.find_all('link', rel='stylesheet')
     count = len(stylesheets)
     findings = []
-    
+
     if count > 5:
-        findings.append(create_finding("medium", f"High number of external stylesheets ({count}).", "Consolidate CSS files to reduce HTTP requests.", "web-perf"))
+        f = create_finding("medium", f"High number of external stylesheets ({count}).", "Consolidate CSS files to reduce HTTP requests.", "web-perf")
+        f["elements"] = [make_element_entry(s) for s in stylesheets[:5]]
+        findings.append(f)
         
     return {
         "status": "pass" if not findings else "fail",
@@ -158,13 +165,16 @@ def check_external_stylesheets(soup: BeautifulSoup) -> Dict[str, Any]:
 def check_render_blocking_scripts(soup: BeautifulSoup) -> Dict[str, Any]:
     head = soup.find('head')
     if not head: return {"status": "fail", "details": {}, "findings": [create_finding("medium", "No <head> found", "", "")]}
-    
+
     scripts = head.find_all('script', src=True)
-    blocking = sum(1 for s in scripts if not s.has_attr('async') and not s.has_attr('defer'))
-    
+    blocking_els = [s for s in scripts if not s.has_attr('async') and not s.has_attr('defer')]
+    blocking = len(blocking_els)
+
     findings = []
     if blocking > 2:
-        findings.append(create_finding("medium", f"Found {blocking} render-blocking scripts in the <head>.", "Add 'defer' or 'async' to scripts if they are not strictly critical for initial render.", "web-perf"))
+        f = create_finding("medium", f"Found {blocking} render-blocking scripts in the <head>.", "Add 'defer' or 'async' to scripts if they are not strictly critical for initial render.", "web-perf")
+        f["elements"] = [make_element_entry(s) for s in blocking_els[:5]]
+        findings.append(f)
         
     return {
         "status": "pass" if not findings else "fail",
@@ -195,16 +205,20 @@ def check_webflow_js_bloat(soup: BeautifulSoup, html: str) -> Dict[str, Any]:
 def check_third_party_scripts(soup: BeautifulSoup) -> Dict[str, Any]:
     scripts = soup.find_all('script', src=True)
     third_party = 0
+    third_party_els = []
     domains = set()
     for s in scripts:
         src = s['src']
         if src.startswith('http') and 'assets.website-files.com' not in src:
             third_party += 1
+            third_party_els.append(s)
             domains.add(src.split('/')[2])
-            
+
     findings = []
     if third_party > 5:
-        findings.append(create_finding("medium", f"High number of third-party scripts ({third_party}).", "Evaluate script necessity and use Tag Manager to defer.", "web-perf"))
+        f = create_finding("medium", f"High number of third-party scripts ({third_party}).", "Evaluate script necessity and use Tag Manager to defer.", "web-perf")
+        f["elements"] = [make_element_entry(s) for s in third_party_els[:5]]
+        findings.append(f)
         
     return {
         "status": "pass" if not findings else "fail",

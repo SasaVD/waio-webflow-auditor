@@ -25,5 +25,8 @@
     ]
   },
   "model": "opus",
-  "maxThinkingTokens": 32000
+  "maxThinkingTokens": 32000,
+  "enabledPlugins": {
+    "playwright@claude-plugins-official": false
+  }
 }

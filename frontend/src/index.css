@@ -1,41 +1,102 @@
 @import "tailwindcss";
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================
+ * WAIO Design System — Dark-First Brand DNA
+ * Veza Digital · #0D121C / #2820FF / Glow
+ * ============================================ */
 
 @theme {
+  /* --- Brand / Accent (Vivid Indigo) --- */
+  --color-accent: #2820FF;
+  --color-accent-hover: #3D35FF;
+  --color-accent-muted: #2820FF20;
+
+  /* Legacy aliases — old components use "primary" and "accent-light" */
   --color-primary: #2820FF;
-  --color-primary-hover: #1E18CC;
-  --color-primary-light: #EEEDFF;
-  --color-accent: #00C896;
-  --color-accent-light: #E6FAF4;
+  --color-primary-hover: #3D35FF;
+  --color-primary-light: #2820FF20;
+  --color-accent-light: #47CD8915;
 
-  --color-surface: #FFFFFF;
-  --color-surface-secondary: #F7F8FA;
-  --color-surface-dark: #0F0F14;
-  --color-surface-dark-secondary: #1A1A24;
+  /* --- Secondary Accents --- */
+  --color-secondary-blue: #0194FE;
+  --color-secondary-cyan: #30DAFF;
 
-  --color-border: #E5E7EB;
-  --color-border-light: #F0F1F3;
+  /* --- Status --- */
+  --color-success: #47CD89;
+  --color-success-glow: #E3FBDE;
+  --color-warning: #F59E0B;
+  --color-error: #EF4444;
+  --color-critical: #DC2626;
 
-  --color-text-primary: #0F0F14;
-  --color-text-secondary: #4B5563;
-  --color-text-muted: #9CA3AF;
+  /* --- Surfaces (Dark-First) --- */
+  --color-surface: #0D121C;
+  --color-surface-raised: #151B28;
+  --color-surface-overlay: #1A2235;
+
+  /* Legacy aliases */
+  --color-surface-secondary: #151B28;
+  --color-surface-dark: #0D121C;
+  --color-surface-dark-secondary: #1A2235;
+
+  /* --- Text (Light-on-Dark) --- */
+  --color-text: #F1F5F9;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted: #64748B;
+
+  /* Legacy aliases */
+  --color-text-primary: #F1F5F9;
   --color-text-on-dark: #FFFFFF;
-  --color-text-on-dark-muted: #9CA3AF;
+  --color-text-on-dark-muted: #94A3B8;
 
-  --color-severity-critical: #EF4444;
-  --color-severity-critical-bg: #FEF2F2;
-  --color-severity-high: #F97316;
-  --color-severity-high-bg: #FFF7ED;
-  --color-severity-medium: #EAB308;
-  --color-severity-medium-bg: #FEFCE8;
+  /* --- Borders --- */
+  --color-border: #1E293B;
+  --color-border-subtle: #1E293B80;
 
+  /* Legacy alias */
+  --color-border-light: #1E293B80;
+
+  /* --- Severity (dark-mode backgrounds are translucent) --- */
+  --color-severity-critical: #DC2626;
+  --color-severity-critical-bg: #DC262615;
+  --color-severity-high: #EF4444;
+  --color-severity-high-bg: #EF444415;
+  --color-severity-medium: #F59E0B;
+  --color-severity-medium-bg: #F59E0B15;
+  --color-severity-low: #0194FE;
+  --color-severity-low-bg: #0194FE15;
+  --color-severity-positive: #47CD89;
+  --color-severity-positive-bg: #47CD8915;
+
+  /* --- Score Colors (unchanged — high contrast on dark) --- */
   --color-score-excellent: #22C55E;
   --color-score-good: #84CC16;
   --color-score-needs: #EAB308;
   --color-score-poor: #F97316;
   --color-score-critical: #EF4444;
 
-  --font-family-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  /* --- Typography --- */
+  --font-heading: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
+  /* Legacy alias */
+  --font-family-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* --- Border Radius --- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* --- Shadows --- */
+  --shadow-glow-accent: 0 0 20px 0 #2820FF40, 0 0 60px 0 #2820FF20;
+  --shadow-glow-blue: 0 0 20px 0 #0194FE30, 0 0 50px 0 #0194FE15;
+  --shadow-glow-success: 0 0 15px 0 #47CD8930;
+  --shadow-card: 0 1px 3px 0 #0D121C80, 0 4px 16px 0 #0D121C40;
+  --shadow-card-hover: 0 4px 12px 0 #0D121C90, 0 8px 24px 0 #0D121C60;
+
+  /* --- Animations --- */
   --animate-fade-in: fade-in 0.5s ease-out;
   --animate-slide-up: slide-up 0.5s ease-out;
   --animate-pulse-slow: pulse-slow 3s ease-in-out infinite;
@@ -54,24 +115,70 @@
   }
 }
 
+/* ============================================
+ * Base Styles
+ * ============================================ */
+
 body {
-  font-family: var(--font-family-sans);
-  color: var(--color-text-secondary);
-  background-color: var(--color-surface-secondary);
+  font-family: var(--font-body);
+  color: var(--color-text);
+  background-color: var(--color-surface);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
+/* ============================================
+ * Scrollbar (dark)
+ * ============================================ */
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+/* ============================================
+ * Utility: Glow Effects
+ * ============================================ */
+
+.glow-accent {
+  box-shadow: 0 0 20px 0 #2820FF40, 0 0 60px 0 #2820FF20;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+.glow-blue {
+  box-shadow: 0 0 20px 0 #0194FE30, 0 0 50px 0 #0194FE15;
 }
-::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 999px;
+.glow-success {
+  box-shadow: 0 0 15px 0 #47CD8930;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.2);
+
+/* ============================================
+ * Utility: Grid Pattern Background
+ * ============================================ */
+
+.bg-grid-pattern {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+/* ============================================
+ * Radix Collapsible Animations
+ * ============================================ */
+
+@keyframes slideDown {
+  from { height: 0; opacity: 0; }
+  to { height: var(--radix-collapsible-content-height); opacity: 1; }
+}
+@keyframes slideUp {
+  from { height: var(--radix-collapsible-content-height); opacity: 1; }
+  to { height: 0; opacity: 0; }
+}
+
+[data-state="open"] > .animate-slideDown,
+.animate-slideDown {
+  animation: slideDown 200ms ease-out;
+}
+[data-state="closed"] > .animate-slideUp,
+.animate-slideUp {
+  animation: slideUp 150ms ease-in;
 }

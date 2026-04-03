@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from playwright.async_api import Browser, Page
 from axe_playwright_python.async_playwright import Axe
 from crawler import get_browser
+from utils import truncate_html
 
 async def run_accessibility_audit(url: str) -> Dict[str, Any]:
     browser = await get_browser()
@@ -95,20 +96,36 @@ async def check_axe_scan(page: Page) -> Dict[str, Any]:
         # Handle both dict and object access
         impact = violation.get('impact', 'medium') if isinstance(violation, dict) else getattr(violation, 'impact', 'medium')
         sev = impact_map.get(impact, "medium")
-        
+
         desc = violation.get('description', '') if isinstance(violation, dict) else getattr(violation, 'description', '')
         help_url = violation.get('helpUrl', '') if isinstance(violation, dict) else getattr(violation, 'helpUrl', '')
         vic_help = violation.get('help', '') if isinstance(violation, dict) else getattr(violation, 'help', '')
         v_id = violation.get('id', 'unknown') if isinstance(violation, dict) else getattr(violation, 'id', 'unknown')
         nodes = violation.get('nodes', []) if isinstance(violation, dict) else getattr(violation, 'nodes', [])
         nodes_count = len(nodes)
-        
-        findings.append(create_finding(
+
+        f = create_finding(
             sev,
             f"Axe rule '{v_id}': {desc} ({nodes_count} elements)",
             vic_help,
             help_url
-        ))
+        )
+
+        # Extract element data from axe-core nodes
+        elements = []
+        for node in nodes[:5]:
+            n_target = node.get('target', []) if isinstance(node, dict) else getattr(node, 'target', [])
+            n_html = node.get('html', '') if isinstance(node, dict) else getattr(node, 'html', '')
+            selector = ', '.join(n_target) if isinstance(n_target, list) else str(n_target)
+            elements.append({
+                "selector": selector,
+                "html_snippet": truncate_html(str(n_html)),
+                "location": "page content",
+            })
+        if elements:
+            f["elements"] = elements
+
+        findings.append(f)
         
     return {
         "status": "pass" if not findings else "fail",

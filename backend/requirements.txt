@@ -12,3 +12,9 @@ nltk
 fpdf2
 resend
 aiosqlite
+asyncpg
+python-dotenv
+httpx
+cryptography
+trafilatura
+scikit-learn

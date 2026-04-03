@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, ExternalLink, FileCode, FileJson, Paintbrush, Zap, Accessibility,
   AlertTriangle, AlertCircle, XCircle, Info, CheckCircle2, ChevronDown, ChevronUp,
-  BookOpen, Layers, Radio, ShieldCheck, Download, Mail, FileText, Loader2, X, Link2
+  BookOpen, Layers, Radio, ShieldCheck, Download, Mail, FileText, Loader2, X,
+  Link2, Wrench, Code2, Crown, Lock,
 } from 'lucide-react';
+import { ExecutiveSummary } from './ExecutiveSummary';
+import { LinkGraph } from './LinkGraph';
 
 interface ReportProps {
   report: any;
@@ -31,10 +34,10 @@ const scoreColorClass = (label: string): string => {
   return 'text-score-critical';
 };
 
-const severityConfig: Record<string, { bg: string; text: string; border: string; icon: any }> = {
-  critical: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-100', icon: XCircle },
-  high: { bg: 'bg-orange-50', text: 'text-orange-600', border: 'border-orange-100', icon: AlertCircle },
-  medium: { bg: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-100', icon: Info },
+const severityStyles: Record<string, { bg: string; border: string; text: string; badge: string; icon: any }> = {
+  critical: { bg: 'bg-severity-critical-bg', border: 'border-l-severity-critical', text: 'text-red-300', badge: 'bg-severity-critical', icon: XCircle },
+  high:     { bg: 'bg-severity-high-bg', border: 'border-l-severity-high', text: 'text-red-300', badge: 'bg-severity-high', icon: AlertCircle },
+  medium:   { bg: 'bg-severity-medium-bg', border: 'border-l-severity-medium', text: 'text-yellow-200', badge: 'bg-severity-medium', icon: Info },
 };
 
 const pillarMeta: Record<string, { icon: any; label: string }> = {
@@ -42,7 +45,7 @@ const pillarMeta: Record<string, { icon: any; label: string }> = {
   structured_data: { icon: FileJson, label: 'Structured Data' },
   aeo_content: { icon: BookOpen, label: 'AEO Content' },
   css_quality: { icon: Paintbrush, label: 'CSS Quality' },
-  js_bloat: { icon: Zap, label: 'JS Bloat' },
+  js_bloat: { icon: Zap, label: 'JS Performance' },
   accessibility: { icon: Accessibility, label: 'Accessibility' },
   rag_readiness: { icon: Layers, label: 'RAG Readiness' },
   agentic_protocols: { icon: Radio, label: 'Agentic Protocols' },
@@ -57,11 +60,12 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [email, setEmail] = useState('');
   const [emailSending, setEmailSending] = useState(false);
-  const [emailResult, setEmailResult] = useState<{success: boolean; message: string} | null>(null);
+  const [emailResult, setEmailResult] = useState<{ success: boolean; message: string } | null>(null);
 
   if (!report) return null;
 
   const apiBase = import.meta.env.PROD ? '' : 'http://127.0.0.1:8000';
+  const isPremium = report.tier === 'premium';
 
   const handleDownloadPdf = async () => {
     setPdfLoading(true);
@@ -69,7 +73,7 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
       const res = await fetch(`${apiBase}/api/export/pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report })
+        body: JSON.stringify({ report }),
       });
       if (!res.ok) throw new Error('PDF generation failed');
       const blob = await res.blob();
@@ -94,7 +98,7 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
       const res = await fetch(`${apiBase}/api/export/md`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report })
+        body: JSON.stringify({ report }),
       });
       if (!res.ok) throw new Error('Markdown generation failed');
       const blob = await res.blob();
@@ -122,7 +126,7 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
       const res = await fetch(`${apiBase}/api/send-report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, report })
+        body: JSON.stringify({ email, report }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -138,9 +142,9 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
   };
 
   return (
-    <div className="bg-surface-secondary min-h-screen">
+    <div className="bg-surface min-h-screen">
       {/* Report Header */}
-      <div className="bg-white border-b border-border">
+      <div className="bg-surface-raised border-b border-border">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
@@ -148,7 +152,7 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
                 <span className="text-xs font-semibold text-text-muted uppercase tracking-widest">Audit Report</span>
                 <span className="text-xs text-text-muted">
                   {new Date(report.audit_timestamp).toLocaleDateString('en-US', {
-                    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                   })}
                 </span>
               </div>
@@ -156,7 +160,7 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
                 href={report.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xl md:text-2xl font-bold text-text-primary hover:text-primary transition-colors inline-flex items-center gap-2"
+                className="text-xl md:text-2xl font-bold text-text hover:text-accent transition-colors inline-flex items-center gap-2"
               >
                 {report.url}
                 <ExternalLink size={16} className="text-text-muted" />
@@ -166,7 +170,7 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
               <button
                 onClick={handleDownloadPdf}
                 disabled={pdfLoading}
-                className="flex items-center gap-2 bg-white hover:bg-surface-secondary border border-border text-text-primary font-semibold px-3.5 py-2.5 rounded-xl transition-all text-sm disabled:opacity-50"
+                className="flex items-center gap-2 bg-surface-overlay hover:bg-surface-raised border border-border text-text font-semibold px-3.5 py-2.5 rounded-xl transition-all text-sm disabled:opacity-50"
               >
                 {pdfLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                 PDF
@@ -174,21 +178,21 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
               <button
                 onClick={handleDownloadMd}
                 disabled={mdLoading}
-                className="flex items-center gap-2 bg-white hover:bg-surface-secondary border border-border text-text-primary font-semibold px-3.5 py-2.5 rounded-xl transition-all text-sm disabled:opacity-50"
+                className="flex items-center gap-2 bg-surface-overlay hover:bg-surface-raised border border-border text-text font-semibold px-3.5 py-2.5 rounded-xl transition-all text-sm disabled:opacity-50"
               >
                 {mdLoading ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
                 Markdown
               </button>
               <button
                 onClick={() => { setShowEmailModal(!showEmailModal); setEmailResult(null); }}
-                className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white font-semibold px-4 py-2.5 rounded-xl transition-all text-sm"
+                className="flex items-center gap-2 bg-accent hover:bg-accent-hover text-white font-semibold px-4 py-2.5 rounded-xl transition-all text-sm"
               >
                 <Mail size={14} />
-                Email Report
+                Email
               </button>
               <button
                 onClick={onNewAudit}
-                className="flex items-center gap-2 bg-white hover:bg-surface-secondary border border-border text-text-primary font-semibold px-4 py-2.5 rounded-xl transition-all text-sm"
+                className="flex items-center gap-2 bg-surface-overlay hover:bg-surface-raised border border-border text-text font-semibold px-4 py-2.5 rounded-xl transition-all text-sm"
               >
                 <ArrowLeft size={16} />
                 New Audit
@@ -196,16 +200,16 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
               {onViewHistory && (
                 <button
                   onClick={onViewHistory}
-                  className="flex items-center gap-2 bg-surface-secondary hover:bg-gray-200 border border-border text-text-primary font-semibold px-4 py-2.5 rounded-xl transition-all text-sm"
+                  className="flex items-center gap-2 bg-surface-overlay hover:bg-surface-raised border border-border text-text font-semibold px-4 py-2.5 rounded-xl transition-all text-sm"
                 >
                   <Layers size={14} />
-                  View History
+                  History
                 </button>
               )}
             </div>
           </div>
 
-          {/* Email Modal (inline dropdown) */}
+          {/* Email Modal */}
           <AnimatePresence>
             {showEmailModal && (
               <motion.div
@@ -214,13 +218,13 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
                 exit={{ opacity: 0, height: 0, marginTop: 0 }}
                 className="overflow-hidden"
               >
-                <div className="bg-surface-secondary border border-border rounded-2xl p-5 max-w-xl ml-auto">
+                <div className="bg-surface-overlay border border-border rounded-2xl p-5 max-w-xl ml-auto">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <Mail size={16} className="text-primary" />
-                      <span className="text-sm font-bold text-text-primary">Send Report via Email</span>
+                      <Mail size={16} className="text-accent" />
+                      <span className="text-sm font-bold text-text">Send Report via Email</span>
                     </div>
-                    <button onClick={() => setShowEmailModal(false)} className="text-text-muted hover:text-text-primary">
+                    <button onClick={() => setShowEmailModal(false)} className="text-text-muted hover:text-text">
                       <X size={16} />
                     </button>
                   </div>
@@ -231,12 +235,12 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="Enter email address..."
                       required
-                      className="flex-1 bg-white border border-border-light rounded-xl px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary/30 focus:ring-2 focus:ring-primary/10"
+                      className="flex-1 bg-surface-raised border border-border rounded-xl px-4 py-2.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent/30 focus:ring-2 focus:ring-accent/10"
                     />
                     <button
                       type="submit"
                       disabled={emailSending || !email}
-                      className="bg-primary hover:bg-primary-hover text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-all disabled:opacity-50 flex items-center gap-2"
+                      className="bg-accent hover:bg-accent-hover text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-all disabled:opacity-50 flex items-center gap-2"
                     >
                       {emailSending ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
                       Send
@@ -248,11 +252,11 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
                       animate={{ opacity: 1, y: 0 }}
                       className={`mt-3 px-4 py-2.5 rounded-xl text-sm font-medium ${
                         emailResult.success
-                          ? 'bg-accent-light text-accent border border-accent/10'
-                          : 'bg-severity-critical-bg text-severity-critical border border-severity-critical/10'
+                          ? 'bg-severity-positive-bg text-success border border-success/20'
+                          : 'bg-severity-critical-bg text-severity-critical border border-severity-critical/20'
                       }`}
                     >
-                      {emailResult.success ? '✓' : '✗'} {emailResult.message}
+                      {emailResult.message}
                     </motion.div>
                   )}
                 </div>
@@ -264,81 +268,88 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
 
       {/* Dashboard Content */}
       <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Row 1: Overall Score + Summary Stats */}
+        {/* Row 1: Score Gauge + Stats */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
           className="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-4"
         >
-          {/* Overall Score - Dark Card */}
-          <div className="lg:col-span-4 bg-surface-dark rounded-2xl p-8 flex flex-col items-center justify-center text-center relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent pointer-events-none" />
+          <div className="lg:col-span-4 bg-surface-raised rounded-2xl p-8 flex flex-col items-center justify-center text-center relative overflow-hidden border border-border">
+            <div className="absolute inset-0 bg-gradient-to-br from-accent/10 to-transparent pointer-events-none" />
             <div className="relative z-10">
               <ScoreGauge score={report.overall_score} label={report.overall_label} size={160} />
               <div className="mt-4">
                 <div className={`text-sm font-bold uppercase tracking-widest ${scoreColorClass(report.overall_label)}`}>
                   {report.overall_label}
                 </div>
-                <div className="text-xs text-text-on-dark-muted mt-1">Overall Health Score</div>
+                <div className="text-xs text-text-muted mt-1">Overall Health Score</div>
               </div>
             </div>
           </div>
 
-          {/* Summary Stats */}
           <div className="lg:col-span-8 grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard
-              label="Total Issues"
-              value={report.summary.total_findings}
-              color="text-text-primary"
-              bgColor="bg-white"
-            />
-            <StatCard
-              label="Critical"
-              value={report.summary.critical}
-              color="text-severity-critical"
-              bgColor="bg-severity-critical-bg"
-              borderColor="border-severity-critical/10"
-            />
-            <StatCard
-              label="High"
-              value={report.summary.high}
-              color="text-severity-high"
-              bgColor="bg-severity-high-bg"
-              borderColor="border-severity-high/10"
-            />
-            <StatCard
-              label="Medium"
-              value={report.summary.medium}
-              color="text-severity-medium"
-              bgColor="bg-severity-medium-bg"
-              borderColor="border-severity-medium/10"
-            />
+            <StatCard label="Total Issues" value={report.summary.total_findings} color="text-text" />
+            <StatCard label="Critical" value={report.summary.critical} color="text-severity-critical" accent="severity-critical" />
+            <StatCard label="High" value={report.summary.high} color="text-severity-high" accent="severity-high" />
+            <StatCard label="Medium" value={report.summary.medium} color="text-severity-medium" accent="severity-medium" />
           </div>
         </motion.div>
 
-        {/* Row 1b: Pillar Score Cards */}
+        {/* Pillar Score Grid */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.1 }}
           className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4"
         >
-            {Object.entries(report.categories).map(([key, cat]: [string, any]) => {
-              const meta = pillarMeta[key];
-              if (!meta || !cat) return null;
-              return (
-                <PillarMiniCard
-                  key={key}
-                  icon={meta.icon}
-                  label={meta.label}
-                  catVal={cat}
-                />
-              );
-            })}
+          {Object.entries(report.categories).map(([key, cat]: [string, any]) => {
+            const meta = pillarMeta[key];
+            if (!meta || !cat) return null;
+            return <PillarMiniCard key={key} icon={meta.icon} label={meta.label} catVal={cat} />;
+          })}
         </motion.div>
 
-        {/* Row 2: Action Items + Positive Findings */}
+        {/* Executive Summary (premium only) */}
+        {report.executive_summary && <ExecutiveSummary markdown={report.executive_summary} />}
+
+        {/* Competitive Ranking (premium) */}
+        {report.competitive_data?.rankings && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.12 }}
+            className="bg-surface-raised border border-border rounded-2xl p-5 mb-4"
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle size={16} className="text-warning" />
+              <h3 className="text-sm font-bold text-text">Competitive Ranking</h3>
+              <span className="text-xs text-text-muted ml-auto">{report.competitive_data.total_urls} sites compared</span>
+            </div>
+            <div className="space-y-2">
+              {report.competitive_data.rankings.map((entry: any, idx: number) => {
+                const isPrimary = entry.url === report.url || entry.url === report.competitive_data.primary_url;
+                return (
+                  <div key={entry.url} className={`flex items-center gap-3 px-3 py-2 rounded-lg ${isPrimary ? 'bg-accent-muted border border-accent/20' : ''}`}>
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-warning text-surface' : 'bg-surface-overlay text-text-muted'}`}>
+                      {idx + 1}
+                    </span>
+                    <span className={`text-sm truncate flex-1 ${isPrimary ? 'font-semibold text-text' : 'text-text-secondary'}`}>
+                      {entry.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                      {isPrimary && <span className="ml-2 text-xs text-accent font-semibold">(Your site)</span>}
+                    </span>
+                    <span className={`text-sm font-bold ${scoreColorClass(entry.overall_label || '')}`}>{entry.overall_score}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Link Graph (premium) */}
+        {report.audit_id && isPremium && <LinkGraph auditId={report.audit_id} />}
+
+        {/* Action Items + Positive Findings */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -349,20 +360,23 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
           <PositiveFindings findings={report.positive_findings} />
         </motion.div>
 
-        {/* Row 3: Detailed Findings */}
+        {/* Detailed Findings */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.3 }}
         >
-          <DetailedFindings categories={report.categories} />
+          <DetailedFindings categories={report.categories} webflowFixes={report.webflow_fixes} />
         </motion.div>
+
+        {/* Blurred Premium Preview (free tier only) */}
+        {!isPremium && <PremiumPreview />}
       </div>
     </div>
   );
 };
 
-/* ─── Score Gauge (SVG) ─── */
+/* ─── Score Gauge ─── */
 const ScoreGauge: React.FC<{ score: number; label: string; size: number }> = ({ score, label, size }) => {
   const color = scoreColor(label);
   const radius = (size - 20) / 2;
@@ -372,24 +386,9 @@ const ScoreGauge: React.FC<{ score: number; label: string; size: number }> = ({ 
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="transform -rotate-90">
-        {/* Background track */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="rgba(255,255,255,0.08)"
-          strokeWidth="10"
-        />
-        {/* Score arc */}
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
         <motion.circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth="10"
-          strokeLinecap="round"
+          cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round"
           strokeDasharray={circumference}
           initial={{ strokeDashoffset: circumference }}
           animate={{ strokeDashoffset: offset }}
@@ -397,12 +396,7 @@ const ScoreGauge: React.FC<{ score: number; label: string; size: number }> = ({ 
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <motion.span
-          className="text-5xl font-extrabold text-text-on-dark"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-        >
+        <motion.span className="text-5xl font-extrabold text-text" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}>
           {score}
         </motion.span>
       </div>
@@ -411,60 +405,42 @@ const ScoreGauge: React.FC<{ score: number; label: string; size: number }> = ({ 
 };
 
 /* ─── Stat Card ─── */
-const StatCard: React.FC<{
-  label: string;
-  value: number;
-  color: string;
-  bgColor: string;
-  borderColor?: string;
-}> = ({ label, value, color, bgColor, borderColor }) => (
-  <div className={`${bgColor} rounded-2xl p-5 border ${borderColor || 'border-border-light'} flex flex-col justify-between`}>
+const StatCard: React.FC<{ label: string; value: number; color: string; accent?: string }> = ({ label, value, color, accent }) => (
+  <div className={`bg-surface-raised rounded-2xl p-5 border border-border flex flex-col justify-between ${accent ? `border-l-4 border-l-${accent}` : ''}`}>
     <div className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-3">{label}</div>
     <div className={`text-3xl font-extrabold ${color}`}>{value}</div>
   </div>
 );
 
 /* ─── Pillar Mini Card ─── */
-const PillarMiniCard: React.FC<{
-  icon: any;
-  label: string;
-  catVal: any;
-}> = ({ icon: Icon, label, catVal }) => {
+const PillarMiniCard: React.FC<{ icon: any; label: string; catVal: any }> = ({ icon: Icon, label, catVal }) => {
   const score = catVal.score;
   const scoreLabel = catVal.label;
-  
+
   const findings: any[] = [];
   Object.values(catVal.checks || {}).forEach((chk: any) => {
-    if (chk.findings) {
-      chk.findings.forEach((f: any) => findings.push(f));
-    }
+    if (chk.findings) chk.findings.forEach((f: any) => findings.push(f));
   });
-  
-  const totalIssues = findings.length;
 
   return (
-    <div className="bg-white rounded-2xl p-5 border border-border-light flex flex-col justify-between hover:border-primary/10 transition-colors">
+    <div className="bg-surface-raised rounded-2xl p-5 border border-border flex flex-col justify-between hover:border-accent/20 transition-colors">
       <div className="flex items-start justify-between mb-3">
-        <div className="w-8 h-8 rounded-lg bg-surface-secondary flex items-center justify-center">
+        <div className="w-8 h-8 rounded-lg bg-surface-overlay flex items-center justify-center">
           <Icon size={15} className="text-text-muted" />
         </div>
         <div className="text-right">
           <div className="flex items-baseline justify-end gap-1">
-             <span className={`text-2xl font-extrabold ${scoreColorClass(scoreLabel)}`}>{score}</span>
-             <span className="text-[10px] text-text-muted font-bold">/100</span>
+            <span className={`text-2xl font-extrabold ${scoreColorClass(scoreLabel)}`}>{score}</span>
+            <span className="text-[10px] text-text-muted font-bold">/100</span>
           </div>
-          {totalIssues > 0 && (
-             <div className="text-[10px] font-semibold text-text-muted mt-1">
-               {totalIssues} issues
-             </div>
+          {findings.length > 0 && (
+            <div className="text-[10px] font-semibold text-text-muted mt-1">{findings.length} issues</div>
           )}
         </div>
       </div>
       <div>
-        <div className="text-xs font-semibold text-text-primary">{label}</div>
-        <div className={`text-[10px] font-bold uppercase tracking-wider ${scoreColorClass(scoreLabel)}`}>
-          {scoreLabel}
-        </div>
+        <div className="text-xs font-semibold text-text">{label}</div>
+        <div className={`text-[10px] font-bold uppercase tracking-wider ${scoreColorClass(scoreLabel)}`}>{scoreLabel}</div>
       </div>
     </div>
   );
@@ -474,12 +450,12 @@ const PillarMiniCard: React.FC<{
 const ActionItems: React.FC<{ priorities: string[] }> = ({ priorities }) => {
   if (!priorities?.length) return null;
   return (
-    <div className="bg-white rounded-2xl border border-border-light p-6">
+    <div className="bg-surface-raised rounded-2xl border border-border p-6">
       <div className="flex items-center gap-2.5 mb-5">
         <div className="w-8 h-8 rounded-lg bg-severity-high-bg flex items-center justify-center">
           <AlertTriangle size={15} className="text-severity-high" />
         </div>
-        <h3 className="text-base font-bold text-text-primary">Top Priorities</h3>
+        <h3 className="text-base font-bold text-text">Top Priorities</h3>
       </div>
       <div className="space-y-2.5">
         {priorities.map((p, i) => (
@@ -499,12 +475,12 @@ const ActionItems: React.FC<{ priorities: string[] }> = ({ priorities }) => {
 const PositiveFindings: React.FC<{ findings: any[] }> = ({ findings }) => {
   if (!findings?.length) return null;
   return (
-    <div className="bg-white rounded-2xl border border-border-light p-6">
+    <div className="bg-surface-raised rounded-2xl border border-border p-6">
       <div className="flex items-center gap-2.5 mb-5">
-        <div className="w-8 h-8 rounded-lg bg-accent-light flex items-center justify-center">
-          <CheckCircle2 size={15} className="text-accent" />
+        <div className="w-8 h-8 rounded-lg bg-severity-positive-bg flex items-center justify-center">
+          <CheckCircle2 size={15} className="text-success" />
         </div>
-        <h3 className="text-base font-bold text-text-primary">What's Working Well</h3>
+        <h3 className="text-base font-bold text-text">What's Working Well</h3>
       </div>
       <div className="space-y-2.5">
         {findings.slice(0, 8).map((f, i) => {
@@ -513,11 +489,11 @@ const PositiveFindings: React.FC<{ findings: any[] }> = ({ findings }) => {
           return (
             <div key={i} className="flex flex-col gap-1">
               <div className="flex gap-3 items-start">
-                <CheckCircle2 size={14} className="text-accent flex-shrink-0 mt-1" />
+                <CheckCircle2 size={14} className="text-success flex-shrink-0 mt-1" />
                 <p className="text-sm text-text-secondary leading-relaxed">{text}</p>
               </div>
               {anchor && (
-                <div className="ml-7 mt-1 border-l-2 border-primary/30 bg-[#F0F1FF] rounded-r-lg px-3 py-1.5">
+                <div className="ml-7 mt-1 border-l-2 border-accent/30 bg-accent-muted rounded-r-lg px-3 py-1.5">
                   <p className="text-[11px] italic text-text-muted leading-relaxed">{anchor}</p>
                 </div>
               )}
@@ -529,148 +505,286 @@ const PositiveFindings: React.FC<{ findings: any[] }> = ({ findings }) => {
   );
 };
 
-/* ─── Detailed Findings ─── */
-const DetailedFindings: React.FC<{ categories: any }> = ({ categories }) => {
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+/* ─── Detailed Findings (Sitebulb-style hint cards) ─── */
+const escapeHtml = (str: string): string =>
+  str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  // Group findings by category
-  const categoryFindings: Record<string, any[]> = {};
-  Object.entries(categories).forEach(([catKey, catVal]: [string, any]) => {
-    const findings: any[] = [];
-    Object.values(catVal.checks || {}).forEach((chk: any) => {
-      if (chk.findings) {
-        chk.findings.forEach((f: any) => findings.push(f));
-      }
+const DetailedFindings: React.FC<{ categories: any; webflowFixes?: Record<string, any> }> = ({ categories, webflowFixes }) => {
+  const [expandedFix, setExpandedFix] = useState<string | null>(null);
+  const [expandedElements, setExpandedElements] = useState<string | null>(null);
+  const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set(['critical', 'high', 'medium']));
+
+  // Flatten all findings with category metadata
+  const allFindings = useMemo(() => {
+    const flat: any[] = [];
+    Object.entries(categories).forEach(([catKey, catVal]: [string, any]) => {
+      Object.entries(catVal.checks || {}).forEach(([checkName, chk]: [string, any]) => {
+        if (chk.findings) {
+          chk.findings.forEach((f: any) =>
+            flat.push({ ...f, _check_name: checkName, _catKey: catKey })
+          );
+        }
+      });
     });
-    if (findings.length > 0) {
-      categoryFindings[catKey] = findings.sort((a, _b) =>
+    return flat.sort(
+      (a, b) =>
         ({ critical: 0, high: 1, medium: 2 }[a.severity as string] ?? 3) -
-        ({ critical: 0, high: 1, medium: 2 }[_b.severity as string] ?? 3)
-      );
-    }
-  });
+        ({ critical: 0, high: 1, medium: 2 }[b.severity as string] ?? 3)
+    );
+  }, [categories]);
 
-  const totalFindings = Object.values(categoryFindings).reduce((sum, f) => sum + f.length, 0);
+  const filteredFindings = useMemo(
+    () => allFindings.filter((f) => severityFilter.has(f.severity)),
+    [allFindings, severityFilter]
+  );
 
-  if (totalFindings === 0) {
+  const toggleSeverity = (sev: string) => {
+    setSeverityFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(sev)) next.delete(sev);
+      else next.add(sev);
+      return next;
+    });
+  };
+
+  const critCount = allFindings.filter((f) => f.severity === 'critical').length;
+  const highCount = allFindings.filter((f) => f.severity === 'high').length;
+  const medCount = allFindings.filter((f) => f.severity === 'medium').length;
+
+  if (allFindings.length === 0) {
     return (
-      <div className="bg-white rounded-2xl border border-border-light p-12 text-center">
-        <CheckCircle2 size={48} className="mx-auto mb-4 text-accent opacity-40" />
-        <p className="text-lg font-bold text-text-primary">No issues found across all pillars.</p>
+      <div className="bg-surface-raised rounded-2xl border border-border p-12 text-center">
+        <CheckCircle2 size={48} className="mx-auto mb-4 text-success opacity-40" />
+        <p className="text-lg font-bold text-text">No issues found across all pillars.</p>
         <p className="text-sm text-text-muted mt-1">Your site is in excellent shape.</p>
       </div>
     );
   }
 
+  // Group filtered findings by category
+  const grouped: Record<string, any[]> = {};
+  filteredFindings.forEach((f) => {
+    if (!grouped[f._catKey]) grouped[f._catKey] = [];
+    grouped[f._catKey].push(f);
+  });
+
   return (
-    <div className="bg-white rounded-2xl border border-border-light overflow-hidden">
-      <div className="px-6 py-5 border-b border-border-light flex items-center justify-between">
-        <h3 className="text-base font-bold text-text-primary">Detailed Findings</h3>
-        <span className="text-xs font-bold text-text-muted bg-surface-secondary px-3 py-1 rounded-full">
-          {totalFindings} issues
-        </span>
+    <div className="space-y-4">
+      {/* Header + Filter Chips */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <h3 className="text-base font-bold text-text">
+          Detailed Findings
+          <span className="ml-2 text-xs font-bold text-text-muted bg-surface-overlay px-3 py-1 rounded-full">
+            {filteredFindings.length} of {allFindings.length}
+          </span>
+        </h3>
+        <div className="flex gap-2">
+          {[
+            { key: 'critical', label: 'Critical', count: critCount, color: 'severity-critical' },
+            { key: 'high', label: 'High', count: highCount, color: 'severity-high' },
+            { key: 'medium', label: 'Medium', count: medCount, color: 'severity-medium' },
+          ].map((s) => (
+            <button
+              key={s.key}
+              onClick={() => toggleSeverity(s.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                severityFilter.has(s.key)
+                  ? `bg-${s.color}-bg border-${s.color}/30 text-${s.color}`
+                  : 'bg-surface-raised border-border text-text-muted'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${severityFilter.has(s.key) ? `bg-${s.color}` : 'bg-text-muted'}`} />
+              {s.label} ({s.count})
+            </button>
+          ))}
+        </div>
       </div>
 
-      {Object.entries(categoryFindings).map(([catKey, findings]) => {
+      {/* Findings grouped by category */}
+      {Object.entries(grouped).map(([catKey, findings]) => {
         const meta = pillarMeta[catKey];
         if (!meta) return null;
-        const isExpanded = expandedCategory === catKey;
-        const critCount = findings.filter(f => f.severity === 'critical').length;
-        const highCount = findings.filter(f => f.severity === 'high').length;
-        const medCount = findings.filter(f => f.severity === 'medium').length;
 
         return (
-          <div key={catKey} className="border-b border-border-light last:border-b-0">
-            {/* Category Header */}
-            <button
-              onClick={() => setExpandedCategory(isExpanded ? null : catKey)}
-              className="w-full px-6 py-4 flex items-center justify-between hover:bg-surface-secondary/50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <meta.icon size={16} className="text-text-muted" />
-                <span className="text-sm font-semibold text-text-primary">{meta.label}</span>
-                <div className="flex items-center gap-1.5 ml-2">
-                  {critCount > 0 && (
-                    <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded">
-                      {critCount} critical
-                    </span>
-                  )}
-                  {highCount > 0 && (
-                    <span className="text-[10px] font-bold bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded">
-                      {highCount} high
-                    </span>
-                  )}
-                  {medCount > 0 && (
-                    <span className="text-[10px] font-bold bg-yellow-50 text-yellow-700 px-1.5 py-0.5 rounded">
-                      {medCount} medium
-                    </span>
-                  )}
-                </div>
-              </div>
-              {isExpanded ? (
-                <ChevronUp size={16} className="text-text-muted" />
-              ) : (
-                <ChevronDown size={16} className="text-text-muted" />
-              )}
-            </button>
+          <div key={catKey} className="space-y-3">
+            <div className="flex items-center gap-2 pt-2">
+              <meta.icon size={14} className="text-text-muted" />
+              <span className="text-xs font-bold text-text-secondary uppercase tracking-wider">{meta.label}</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
 
-            {/* Expanded Findings */}
-            {isExpanded && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="px-6 pb-4"
-              >
-                <div className="space-y-3">
-                  {findings.map((f, i) => {
-                    const sev = severityConfig[f.severity] || severityConfig.medium;
-                    const SevIcon = sev.icon;
-                    return (
-                      <div
-                        key={i}
-                        className={`${sev.bg} border ${sev.border} rounded-xl p-4`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <SevIcon size={16} className={`${sev.text} flex-shrink-0 mt-0.5`} />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className={`text-[10px] font-bold uppercase tracking-wider ${sev.text}`}>
-                                {f.severity}
-                              </span>
-                            </div>
-                            <p className="text-sm font-medium text-text-primary mb-2">{f.description}</p>
-                            <div className="bg-white/60 rounded-lg p-3 mt-2">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-primary">Recommendation</span>
-                              <p className="text-xs text-text-secondary mt-1 leading-relaxed">{f.recommendation}</p>
-                            </div>
-                            {f.reference && (
-                              <a
-                                href={f.reference}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-text-muted hover:text-primary mt-2 transition-colors"
-                              >
-                                Reference <ExternalLink size={10} />
-                              </a>
-                            )}
-                            {f.credibility_anchor && (
-                              <div className="mt-3 border-l-[3px] border-primary bg-[#F0F1FF] rounded-r-lg px-3 py-2">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-primary block mb-0.5">Why this matters</span>
-                                <p className="text-[11px] italic text-text-secondary leading-relaxed">{f.credibility_anchor}</p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
+            {findings.map((f, i) => {
+              const sev = severityStyles[f.severity] || severityStyles.medium;
+              const fixId = `${catKey}-${f._check_name}-${i}`;
+              const elId = `${catKey}-elements-${i}`;
+
+              return (
+                <div key={i} className={`${sev.bg} border-l-4 ${sev.border} rounded-lg p-4`}>
+                  <div className="flex items-start gap-3">
+                    {/* Severity Badge */}
+                    <span className={`${sev.badge} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded flex-shrink-0 mt-0.5`}>
+                      {f.severity}
+                    </span>
+
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-text mb-2">{f.description}</p>
+
+                      {/* Recommendation */}
+                      <div className="bg-surface-overlay rounded-lg p-3 mt-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-accent">Recommendation</span>
+                        <p className="text-xs text-text-secondary mt-1 leading-relaxed">{f.recommendation}</p>
                       </div>
-                    );
-                  })}
+
+                      {/* Reference */}
+                      {f.reference && (
+                        <a
+                          href={f.reference}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-text-muted hover:text-accent mt-2 transition-colors"
+                        >
+                          Reference <ExternalLink size={10} />
+                        </a>
+                      )}
+
+                      {/* Credibility Anchor */}
+                      {f.credibility_anchor && (
+                        <div className="mt-3 border-l-[3px] border-accent bg-accent-muted rounded-r-lg px-3 py-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-accent block mb-0.5">Why this matters</span>
+                          <p className="text-[11px] italic text-text-secondary leading-relaxed">{f.credibility_anchor}</p>
+                        </div>
+                      )}
+
+                      {/* Webflow Fix */}
+                      {webflowFixes && f._check_name && webflowFixes[f._check_name] && (() => {
+                        const fix = webflowFixes[f._check_name];
+                        const isFixOpen = expandedFix === fixId;
+                        return (
+                          <div className="mt-3">
+                            <button
+                              onClick={() => setExpandedFix(isFixOpen ? null : fixId)}
+                              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-accent hover:text-accent-hover transition-colors"
+                            >
+                              <Wrench size={12} />
+                              {isFixOpen ? 'Hide' : 'How to Fix in Webflow'}
+                              <span className="text-[10px] font-normal text-text-muted ml-1">
+                                {fix.difficulty} &middot; {fix.estimated_time}
+                              </span>
+                            </button>
+                            <AnimatePresence>
+                              {isFixOpen && (
+                                <motion.div
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="mt-2 bg-surface-overlay rounded-lg border border-border p-4">
+                                    <h4 className="text-xs font-bold text-text mb-2">{fix.title}</h4>
+                                    <div className="text-xs text-text-secondary leading-relaxed whitespace-pre-line">{fix.steps_markdown}</div>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Affected Elements */}
+                      {f.elements?.length > 0 && (() => {
+                        const isElOpen = expandedElements === elId;
+                        return (
+                          <div className="mt-3">
+                            <button
+                              onClick={() => setExpandedElements(isElOpen ? null : elId)}
+                              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-text-muted hover:text-text transition-colors"
+                            >
+                              <Code2 size={12} />
+                              {isElOpen ? 'Hide affected elements' : `Show affected elements (${f.elements.length})`}
+                            </button>
+                            <AnimatePresence>
+                              {isElOpen && (
+                                <motion.div
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="mt-2 space-y-2">
+                                    {f.elements.map((el: { selector: string; html_snippet: string; location: string }, elIdx: number) => (
+                                      <div key={elIdx} className="bg-surface-overlay rounded-lg border border-border p-3">
+                                        <span className="text-[10px] font-medium text-text-muted block mb-1.5">{el.location}</span>
+                                        <div className="text-[11px] font-mono text-accent mb-1.5 break-all">{el.selector}</div>
+                                        <pre className="text-[11px] font-mono text-text-secondary bg-surface rounded-md px-3 py-2 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed border border-border">
+                                          {escapeHtml(el.html_snippet)}
+                                        </pre>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
                 </div>
-              </motion.div>
-            )}
+              );
+            })}
           </div>
         );
       })}
     </div>
   );
 };
+
+/* ─── Blurred Premium Preview ─── */
+const PremiumPreview: React.FC = () => (
+  <motion.div
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.5, delay: 0.4 }}
+    className="mt-8 relative rounded-2xl overflow-hidden border border-border"
+  >
+    {/* Blurred mock content */}
+    <div className="blur-sm pointer-events-none select-none p-8 bg-surface-raised space-y-6">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-lg bg-surface-overlay" />
+        <div>
+          <div className="h-4 w-48 bg-surface-overlay rounded" />
+          <div className="h-3 w-32 bg-surface-overlay rounded mt-2" />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-4">
+        {[1, 2, 3].map((n) => (
+          <div key={n} className="h-24 bg-surface-overlay rounded-xl" />
+        ))}
+      </div>
+      <div className="space-y-3">
+        {[1, 2, 3, 4].map((n) => (
+          <div key={n} className="h-16 bg-surface-overlay rounded-lg" />
+        ))}
+      </div>
+    </div>
+
+    {/* Gradient overlay + CTA */}
+    <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/80 to-surface/40 flex items-center justify-center">
+      <div className="text-center px-6">
+        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-accent/10 flex items-center justify-center">
+          <Crown size={28} className="text-accent" />
+        </div>
+        <p className="text-lg font-bold text-text mb-1 font-heading">Unlock Premium Insights</p>
+        <p className="text-text-muted text-sm mb-6 max-w-md mx-auto">
+          Executive summary, Webflow fix instructions, link graph visualization, WDF*IDF content gaps, and competitor benchmarking.
+        </p>
+        <div className="flex items-center justify-center gap-3">
+          <button className="bg-accent hover:bg-accent-hover text-white px-6 py-2.5 rounded-xl font-semibold transition-all hover:shadow-glow-accent flex items-center gap-2">
+            <Lock size={14} />
+            Upgrade to Premium
+          </button>
+        </div>
+      </div>
+    </div>
+  </motion.div>
+);

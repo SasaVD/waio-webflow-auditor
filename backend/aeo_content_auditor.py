@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup, Tag  # type: ignore
 import re
 import math
 from typing import Dict, Any, List
+from utils import make_element_entry
 
 
 def run_aeo_content_audit(soup: BeautifulSoup, html_content: str) -> Dict[str, Any]:
@@ -174,22 +175,48 @@ def check_readability(soup: BeautifulSoup) -> Dict[str, Any]:
 
     findings = []
 
+    # Score individual paragraphs to find worst offenders
+    main = soup.find("main")
+    container = main if main else soup.find("body")
+    worst_paras = []
+    if container:
+        for p in container.find_all("p"):
+            p_text = p.get_text(separator=" ", strip=True)
+            p_words = p_text.split()
+            if len(p_words) < 15:
+                continue
+            p_sents = [s.strip() for s in re.split(r'[.!?]+', p_text) if len(s.strip()) > 5]
+            if not p_sents:
+                continue
+            p_syllables = sum(_count_syllables(w) for w in p_words)
+            p_grade = 0.39 * (len(p_words) / max(1, len(p_sents))) + 11.8 * (p_syllables / len(p_words)) - 15.59
+            p_grade = round(max(0.0, float(p_grade)), 1)
+            if p_grade > 8:
+                worst_paras.append((p_grade, p))
+        worst_paras.sort(key=lambda x: x[0], reverse=True)
+
     if grade_level > 10:
-        findings.append(create_finding(
+        f = create_finding(
             "high",
             f"Content readability is at Grade {grade_level}, significantly above the optimal range of 6-8.",
             "Simplify sentence structure and use shorter words.",
             "https://seranking.com/blog/ai-overview-study/",
             "Readable text at Flesch-Kincaid Grade 6-8 earns 15% more AI citations on average than Grade 11+ content (SE Ranking study of 2.3M pages, 2025)."
-        ))
+        )
+        if worst_paras:
+            f["elements"] = [make_element_entry(p) for _, p in worst_paras[:3]]
+        findings.append(f)
     elif grade_level > 8:
-        findings.append(create_finding(
+        f = create_finding(
             "medium",
             f"Content readability is at Grade {grade_level}, slightly above the optimal range of 6-8.",
             "Consider simplifying some complex sentences for better AI parsability.",
             "https://seranking.com/blog/ai-overview-study/",
             "Readable text at Flesch-Kincaid Grade 6-8 earns 15% more AI citations on average than Grade 11+ content (SE Ranking study of 2.3M pages, 2025)."
-        ))
+        )
+        if worst_paras:
+            f["elements"] = [make_element_entry(p) for _, p in worst_paras[:3]]
+        findings.append(f)
 
     if not findings:
         return {
@@ -352,13 +379,18 @@ def check_qa_patterns(soup: BeautifulSoup) -> Dict[str, Any]:
     findings = []
 
     if question_headings == 0 and not faq_schema:
-        findings.append(create_finding(
+        f = create_finding(
             "medium",
             "No question-based headings or FAQ patterns detected on the page.",
             "Add question-based headings (e.g., 'What is...?', 'How does...?') to match common AI search queries.",
             "https://www.airops.com/blog/aeo-content-structure",
             "Pages with question-based headings are 2.3x more likely to be cited in AI-generated answers (AirOps, 2026)."
-        ))
+        )
+        # Show headings that could be rephrased as questions
+        candidates = [h for h in headings if len(h.get_text(strip=True)) > 5]
+        if candidates:
+            f["elements"] = [make_element_entry(h) for h in candidates[:3]]
+        findings.append(f)
 
     if not findings:
         msg = f"Found {question_headings} question-based headings"

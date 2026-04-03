@@ -128,7 +128,7 @@ async def get_single_page_audit(job_id: str, url: str) -> Optional[Dict[str, Any
 
 # --- Audit History ---
 
-async def save_audit_history(url: str, audit_type: str, overall_score: int, overall_label: str, report: dict):
+async def save_audit_history(url: str, audit_type: str, overall_score: int, overall_label: str, report: dict, tier: str = "free", audit_id=None):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO audit_history (url, audit_type, overall_score, overall_label, report_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -203,3 +203,72 @@ async def mark_schedule_run(schedule_id: int, frequency: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE scheduled_audits SET last_run = ?, next_run = ? WHERE id = ?", (now.isoformat(), next_run.isoformat(), schedule_id))
         await db.commit()
+
+
+# --- DataForSEO stubs (premium-only, requires PostgreSQL) ---
+
+async def save_dataforseo_task(task_id, audit_id, target_url, max_crawl_pages):
+    pass
+
+async def update_dataforseo_task(task_id, status, summary=None):
+    pass
+
+async def get_dataforseo_task(task_id):
+    return None
+
+async def get_dataforseo_task_by_audit(audit_id_str):
+    return None
+
+
+# --- Google OAuth stubs (premium-only, requires PostgreSQL) ---
+
+async def save_google_tokens(property_url, encrypted_tokens, email=None, ga4_property_id=None, scopes=None):
+    pass
+
+async def get_google_tokens(property_url):
+    return None
+
+async def list_google_tokens():
+    return []
+
+async def delete_google_tokens(property_url):
+    pass
+
+
+# --- Link graph / page content / CMS stubs (premium, requires PostgreSQL) ---
+
+async def save_link_graph_edges(audit_id, edges):
+    pass
+
+async def get_link_graph_data(audit_id_str):
+    return None
+
+async def save_page_content_batch(audit_id, pages):
+    pass
+
+async def save_cms_detection(audit_id, platform, version, confidence, detection_method, technologies):
+    pass
+
+async def save_industry_detection(audit_id, industry, confidence, categories):
+    pass
+
+
+# --- Sprint 4 stubs (premium-only, requires PostgreSQL) ---
+
+async def update_page_content_text(audit_id, url, clean_text, word_count=None, language=None, extraction_method=None):
+    pass
+
+async def update_page_nlp_entities(audit_id, url, entities_json, primary_entity, primary_entity_salience, entity_focus_aligned):
+    pass
+
+async def update_page_nlp_sentiment(audit_id, url, sentiment_score, sentiment_magnitude, entity_sentiments_json):
+    pass
+
+async def get_page_content_for_audit(audit_id_str):
+    return []
+
+async def save_migration_assessment(audit_id, assessment_json):
+    pass
+
+async def get_migration_assessment(audit_id_str):
+    return None

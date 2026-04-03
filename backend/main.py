@@ -1,4 +1,7 @@
 import logging
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, Body, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,7 +10,6 @@ from pydantic import BaseModel, HttpUrl
 from typing import List, Optional
 import os
 import asyncio
-import base64
 
 from crawler import fetch_page, close_browser
 from html_auditor import run_html_audit
@@ -21,16 +23,45 @@ from data_integrity_auditor import run_data_integrity_audit
 from internal_linking_auditor import run_internal_linking_audit
 from scoring import compile_scores
 from report_generator import generate_report
+from executive_summary_generator import generate_executive_summary
+from webflow_fixes import get_fix, get_all_fixes, match_fixes_to_findings
 from pdf_generator import generate_pdf
 from md_generator import generate_markdown
 from email_sender import send_report_email
-from db import (init_db, create_job, get_job_status, get_single_page_audit,
-                save_audit_history, get_audit_history,
-                create_schedule, get_schedules, update_schedule, delete_schedule)
+from db_router import (init_db, close_db, create_job, get_job_status, get_single_page_audit,
+                       save_audit_history, get_audit_history,
+                       create_schedule, get_schedules, update_schedule, delete_schedule,
+                       save_dataforseo_task, update_dataforseo_task,
+                       get_dataforseo_task, get_dataforseo_task_by_audit,
+                       save_google_tokens, get_google_tokens, list_google_tokens,
+                       delete_google_tokens,
+                       save_link_graph_edges, get_link_graph_data,
+                       save_page_content_batch, save_cms_detection,
+                       save_industry_detection,
+                       get_page_content_for_audit,
+                       save_migration_assessment, get_migration_assessment)
 from site_crawler import run_site_crawl
 from scheduler import scheduler_loop
 from competitive_auditor import run_competitive_audit
+from dataforseo_client import DataForSEOClient, DataForSEOError, is_configured as is_dataforseo_configured
+from google_auth import (
+    is_configured as is_google_configured,
+    get_auth_url, exchange_code, encrypt_token, decrypt_token,
+    gsc_list_sites, gsc_get_all_pages, gsc_list_sitemaps,
+    ga4_list_properties, ga4_get_traffic_by_page,
+)
+from link_graph_auditor import build_link_graph
+from cms_detector import detect_cms
+from content_extractor import extract_content
+from content_profile_auditor import build_content_profile
+from cms_migration_auditor import run_migration_assessment
+from wdf_idf_auditor import run_wdf_idf_analysis
+from interlinking_auditor import find_interlinking_opportunities
+from knowledge_base_generator import generate_knowledge_base, export_jsonl_bytes
+import cross_audit_queries
+import json
 import uuid
+from urllib.parse import urlparse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,10 +78,22 @@ app.add_middleware(
 
 class AuditRequest(BaseModel):
     url: HttpUrl
+    tier: str = "free"
 
 class MultiAuditRequest(BaseModel):
     url: HttpUrl
     max_pages: int = 5
+    tier: str = "free"
+
+class PremiumAuditRequest(BaseModel):
+    url: HttpUrl
+    competitor_urls: list[str] = []
+    gsc_property: str | None = None
+    target_keyword: str | None = None
+    max_pages: int = 2000
+    nlp_classification: bool = True
+    nlp_entity_analysis: bool = True
+    nlp_sentiment: bool = False
 
 class ExportRequest(BaseModel):
     report: dict
@@ -82,6 +125,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     await close_browser()
+    await close_db()
 
 @app.get("/api/health")
 async def health_check():
@@ -90,50 +134,48 @@ async def health_check():
 @app.post("/api/audit")
 async def perform_audit(request: AuditRequest):
     url = str(request.url)
-    logger.info(f"Starting audit for {url}")
+    tier = request.tier if request.tier in ("free", "premium") else "free"
+    logger.info(f"Starting {tier} audit for {url}")
     try:
         html_content, soup = await fetch_page(url)
-        
-        # Run audits in parallel where possible
-        # crawler.fetch_page guarantees we have html_content
-        # Accessibility is async via playwright
-        
-        # CPU-bound synchronous audits via to_thread or just run directly
-        # It's fast enough to run sequentially for now.
+
+        # Run the 10 deterministic pillars (always, regardless of tier)
         logger.info(f"Running HTML audit for {url}")
         html_res = run_html_audit(soup, html_content)
-        
+
         logger.info(f"Running Structured Data audit for {url}")
         sd_res = run_structured_data_audit(html_content, url)
-        
+
         logger.info(f"Running CSS/JS audit for {url}")
         css_js_res = run_css_js_audit(soup, html_content)
-        
+
         logger.info(f"Running AEO content audit for {url}")
         aeo_res = run_aeo_content_audit(soup, html_content)
-        
+
         logger.info(f"Running RAG Readiness audit for {url}")
         rag_res = run_rag_readiness_audit(soup, html_content)
-        
+
         logger.info(f"Running Agentic Protocol audit for {url}")
         agent_res = run_agentic_protocol_audit(soup, html_content, url)
-        
+
         logger.info(f"Running Data Integrity audit for {url}")
         data_res = run_data_integrity_audit(soup, html_content)
-        
+
         logger.info(f"Running Internal Linking audit for {url}")
         il_res = run_internal_linking_audit(soup, html_content, str(request.url), site_data=None)
-        
+
         logger.info(f"Running Accessibility audit for {url}")
         a11y_res = await run_accessibility_audit(url)
-        
+
         logger.info("Compiling scores and report")
         scores = compile_scores(html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, il_res)
-        report = generate_report(url, html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, scores, il_res)
-        
+        report = generate_report(url, html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, scores, il_res, tier=tier)
+
+        # Premium modules will be added in later sprints (executive summary, fix KB, etc.)
+
         # Auto-save to audit history
-        await save_audit_history(url, "single", report.get("overall_score", 0), report.get("overall_label", "N/A"), report)
-        
+        await save_audit_history(url, "single", report.get("overall_score", 0), report.get("overall_label", "N/A"), report, tier=tier)
+
         return report
 
     except Exception as e:
@@ -169,6 +211,168 @@ async def perform_competitive_audit(request: CompetitiveRequest):
     except Exception as e:
         logger.error(f"Competitive audit failed: {e}")
         raise HTTPException(status_code=500, detail=f"Competitive audit failed: {str(e)}")
+
+@app.post("/api/audit/premium")
+async def perform_premium_audit(request: PremiumAuditRequest):
+    """Premium audit endpoint — runs the full 10-pillar audit plus premium modules.
+    Premium modules (executive summary, fix KB, link graph, WDF*IDF) will be
+    activated as they are built in Sprints 2-4."""
+    url = str(request.url)
+    audit_id = uuid.uuid4()
+    logger.info(f"Starting premium audit for {url} (audit_id={audit_id})")
+    try:
+        html_content, soup = await fetch_page(url)
+
+        html_res = run_html_audit(soup, html_content)
+        sd_res = run_structured_data_audit(html_content, url)
+        css_js_res = run_css_js_audit(soup, html_content)
+        aeo_res = run_aeo_content_audit(soup, html_content)
+        rag_res = run_rag_readiness_audit(soup, html_content)
+        agent_res = run_agentic_protocol_audit(soup, html_content, url)
+        data_res = run_data_integrity_audit(soup, html_content)
+        il_res = run_internal_linking_audit(soup, html_content, url, site_data=None)
+        a11y_res = await run_accessibility_audit(url)
+
+        scores = compile_scores(html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, il_res)
+        report = generate_report(url, html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, scores, il_res, tier="premium")
+
+        # Sprint 2C: Auto competitor benchmarking
+        competitive_data = None
+        if request.competitor_urls:
+            logger.info(f"Running competitor benchmarking against {len(request.competitor_urls)} URLs")
+            competitive_data = await run_competitive_audit(url, request.competitor_urls)
+            report["competitive_data"] = competitive_data
+
+        # Sprint 2A: Executive summary (with competitor context if available)
+        report["executive_summary"] = generate_executive_summary(report, competitive_data)
+
+        # Sprint 2B: Attach matched Webflow fixes
+        report["webflow_fixes"] = match_fixes_to_findings(report)
+
+        # Sprint 3A: Submit DataForSEO site-wide crawl (async — runs in background)
+        if is_dataforseo_configured():
+            try:
+                app_base = os.environ.get("APP_BASE_URL", "").rstrip("/")
+                dfs_client = DataForSEOClient()
+                pingback_url = f"{app_base}/api/dataforseo/pingback?task_id=$id" if app_base else None
+                task_result = await dfs_client.create_task(
+                    url,
+                    max_crawl_pages=request.max_pages,
+                    pingback_url=pingback_url,
+                    tag=str(audit_id),
+                )
+                await dfs_client.close()
+                report["crawl_task_id"] = task_result["task_id"]
+                report["crawl_status"] = "crawling"
+                report["max_pages_requested"] = request.max_pages
+                logger.info(f"DataForSEO task submitted: {task_result['task_id']} for {url}")
+            except Exception as e:
+                logger.warning(f"DataForSEO task submission failed (non-fatal): {e}")
+                report["crawl_status"] = "unavailable"
+        else:
+            report["crawl_status"] = "not_configured"
+
+        # Sprint 3F: CMS detection on homepage HTML (zero-cost)
+        try:
+            parsed = urlparse(url)
+            domain = parsed.hostname or parsed.netloc
+            cms_result = await detect_cms(html_content, response_headers=None, domain=domain)
+            report["cms_detection"] = cms_result.to_dict()
+            logger.info(f"CMS detected: {cms_result.platform} (confidence={cms_result.confidence})")
+        except Exception as e:
+            logger.warning(f"CMS detection failed (non-fatal): {e}")
+            report["cms_detection"] = None
+
+        # Sprint 4A: Content extraction on homepage (Trafilatura)
+        try:
+            extracted = extract_content(html_content, url)
+            report["content_profile"] = build_content_profile(
+                url, extracted.clean_text, extracted.h1_text, extracted.title,
+            ).to_dict()
+            logger.info(f"Content extracted: {extracted.word_count} words via {extracted.extraction_method}")
+        except Exception as e:
+            logger.warning(f"Content extraction failed (non-fatal): {e}")
+            report["content_profile"] = None
+
+        # Sprint 4B: WDF*IDF gap analysis (if keyword or competitors provided)
+        if request.target_keyword or request.competitor_urls:
+            try:
+                target_text = extracted.clean_text if 'extracted' in dir() else ""
+                if target_text and len(target_text.split()) > 20:
+                    wdf_result = await run_wdf_idf_analysis(
+                        target_url=url,
+                        target_text=target_text,
+                        competitor_urls=request.competitor_urls or None,
+                        target_keyword=request.target_keyword,
+                    )
+                    report["wdf_idf"] = wdf_result.to_dict()
+                    logger.info(f"WDF*IDF: coverage={wdf_result.coverage_score}%, {len(wdf_result.gap_terms)} gaps")
+            except Exception as e:
+                logger.warning(f"WDF*IDF analysis failed (non-fatal): {e}")
+
+        # Sprint 4E: CMS migration assessment (any detected platform except webflow/unknown)
+        detected_platform = (report.get("cms_detection") or {}).get("platform", "unknown")
+        if detected_platform not in ("webflow", "unknown"):
+            try:
+                all_findings = []
+                for cat_data in report.get("categories", {}).values():
+                    for chk in (cat_data.get("checks") or {}).values():
+                        all_findings.extend(chk.get("findings") or [])
+                migration = run_migration_assessment(
+                    source_cms=detected_platform,
+                    total_pages=request.max_pages,
+                    audit_findings=all_findings,
+                )
+                report["migration_assessment"] = migration.to_dict()
+                from cms_migration_auditor import CMS_TIER
+                tier = CMS_TIER.get(detected_platform, 3)
+                logger.info(f"Migration assessment (tier {tier}): {detected_platform} -> webflow")
+            except Exception as e:
+                logger.warning(f"Migration assessment failed (non-fatal): {e}")
+
+        audit_type = "competitive" if competitive_data else "single"
+        await save_audit_history(
+            url, audit_type,
+            report.get("overall_score", 0), report.get("overall_label", "N/A"),
+            report, tier="premium", audit_id=audit_id,
+        )
+
+        # Sprint 3F: Persist CMS detection to database
+        if report.get("cms_detection") and report["cms_detection"].get("platform") != "unknown":
+            try:
+                cms = report["cms_detection"]
+                await save_cms_detection(
+                    audit_id, cms["platform"], cms.get("version"),
+                    cms["confidence"], cms["detection_method"],
+                    cms.get("technologies", []),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save CMS detection: {e}")
+
+        # Sprint 4E: Persist migration assessment to database
+        if report.get("migration_assessment"):
+            try:
+                await save_migration_assessment(
+                    audit_id, json.dumps(report["migration_assessment"]),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save migration assessment: {e}")
+
+        # Save DataForSEO task record after audit is persisted (needs audit_id FK)
+        if report.get("crawl_task_id"):
+            try:
+                await save_dataforseo_task(
+                    report["crawl_task_id"], audit_id, url, request.max_pages,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save DataForSEO task record: {e}")
+
+        report["audit_id"] = str(audit_id)
+        return report
+
+    except Exception as e:
+        logger.error(f"Premium audit failed for {url}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Premium audit failed: {str(e)}")
 
 @app.get("/api/audit/status/{job_id}")
 async def get_audit_status(job_id: str):
@@ -227,6 +431,585 @@ async def update_existing_schedule(schedule_id: int, request: ScheduleUpdateRequ
 async def delete_existing_schedule(schedule_id: int):
     await delete_schedule(schedule_id)
     return {"id": schedule_id, "status": "deleted"}
+
+# --- Webflow Fix Knowledge Base ---
+
+@app.get("/api/fixes")
+async def list_fixes():
+    """List all available Webflow fix instructions."""
+    return {"fixes": get_all_fixes()}
+
+@app.get("/api/fixes/{finding_pattern}")
+async def get_fix_for_finding(finding_pattern: str):
+    """Get Webflow fix instructions for a specific finding pattern."""
+    fix = get_fix(finding_pattern)
+    if not fix:
+        raise HTTPException(status_code=404, detail=f"No fix found for pattern: {finding_pattern}")
+    return fix
+
+# --- DataForSEO Crawl Endpoints (Sprint 3A) ---
+
+@app.get("/api/dataforseo/pingback")
+async def dataforseo_pingback(task_id: str):
+    """Webhook called by DataForSEO when a crawl task finishes.
+    The $id in the pingback URL gets replaced with the actual task_id."""
+    logger.info(f"DataForSEO pingback received for task {task_id}")
+    try:
+        # Fetch the crawl summary from DataForSEO
+        dfs_client = DataForSEOClient()
+        summary = await dfs_client.get_summary(task_id)
+        await dfs_client.close()
+
+        crawl_progress = summary.get("crawl_progress", "unknown")
+        status = "completed" if crawl_progress == "finished" else "failed"
+
+        await update_dataforseo_task(task_id, status=status, summary=summary)
+        logger.info(
+            f"DataForSEO task {task_id} marked {status}: "
+            f"{summary.get('pages_count', 0)} pages, "
+            f"{summary.get('internal_links_count', 0)} internal links"
+        )
+    except DataForSEOError as e:
+        logger.error(f"DataForSEO pingback processing failed: {e}")
+        await update_dataforseo_task(task_id, status="failed")
+    except Exception as e:
+        logger.error(f"Unexpected error in DataForSEO pingback: {e}")
+
+    return {"status": "ok"}
+
+
+@app.get("/api/audit/crawl-status/{task_id}")
+async def get_crawl_status(task_id: str):
+    """Check the status of a DataForSEO crawl task.
+    Used by the frontend to poll for crawl completion."""
+    # First check our local DB
+    task = await get_dataforseo_task(task_id)
+    if task:
+        return {
+            "task_id": task["task_id"],
+            "status": task["status"],
+            "pages_crawled": task["pages_crawled"],
+            "pages_count": task["pages_count"],
+            "internal_links_count": task["internal_links_count"],
+            "external_links_count": task["external_links_count"],
+            "broken_links": task["broken_links"],
+            "created_at": task["created_at"],
+            "completed_at": task["completed_at"],
+        }
+
+    # If not in DB yet, try querying DataForSEO directly
+    if not is_dataforseo_configured():
+        raise HTTPException(status_code=404, detail="Task not found and DataForSEO not configured")
+
+    try:
+        dfs_client = DataForSEOClient()
+        summary = await dfs_client.get_summary(task_id)
+        await dfs_client.close()
+        return {
+            "task_id": task_id,
+            "status": "crawling" if summary.get("crawl_progress") != "finished" else "completed",
+            "pages_crawled": summary.get("pages_crawled", 0),
+            "pages_count": summary.get("pages_count", 0),
+            "internal_links_count": summary.get("internal_links_count", 0),
+            "external_links_count": summary.get("external_links_count", 0),
+            "broken_links": summary.get("broken_links", 0),
+            "created_at": None,
+            "completed_at": None,
+        }
+    except DataForSEOError as e:
+        raise HTTPException(status_code=502, detail=f"DataForSEO query failed: {e.message}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to check crawl status: {str(e)}")
+
+
+# --- Google OAuth Endpoints (Sprint 3B) ---
+
+@app.get("/api/auth/google")
+async def google_auth_start(property_url: str | None = None):
+    """Initiate Google OAuth flow. Returns the consent URL to redirect the user to.
+    Optional property_url is carried through as state to associate tokens after callback."""
+    if not is_google_configured():
+        raise HTTPException(status_code=501, detail="Google OAuth not configured (missing GOOGLE_CLIENT_ID/SECRET)")
+
+    app_base = os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+    redirect_uri = f"{app_base}/api/auth/google/callback"
+    state = property_url or ""
+    auth_url = get_auth_url(redirect_uri, state=state)
+    return {"auth_url": auth_url, "redirect_uri": redirect_uri}
+
+
+@app.get("/api/auth/google/callback")
+async def google_auth_callback(code: str, state: str = ""):
+    """OAuth callback — exchange code for tokens, discover properties, store encrypted."""
+    if not is_google_configured():
+        raise HTTPException(status_code=501, detail="Google OAuth not configured")
+
+    app_base = os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+    redirect_uri = f"{app_base}/api/auth/google/callback"
+
+    try:
+        token_data = await exchange_code(code, redirect_uri)
+    except Exception as e:
+        logger.error(f"Google OAuth exchange failed: {e}")
+        raise HTTPException(status_code=400, detail=f"OAuth code exchange failed: {str(e)}")
+
+    # Discover GSC sites and GA4 properties
+    gsc_sites: list = []
+    ga4_properties: list = []
+    try:
+        gsc_sites = await gsc_list_sites(token_data)
+    except Exception as e:
+        logger.warning(f"Failed to list GSC sites: {e}")
+    try:
+        ga4_properties = await ga4_list_properties(token_data)
+    except Exception as e:
+        logger.warning(f"Failed to list GA4 properties: {e}")
+
+    # If caller specified a property_url in state, store tokens for it
+    property_url = state.strip() if state else None
+    if property_url:
+        encrypted = encrypt_token(token_data)
+        await save_google_tokens(
+            property_url=property_url,
+            encrypted_tokens=encrypted,
+            scopes=token_data.get("scope"),
+        )
+
+    # Return a simple HTML page that posts a message back to the opener window
+    # and the discovered properties for the frontend to handle
+    result = {
+        "success": True,
+        "gsc_sites": gsc_sites,
+        "ga4_properties": ga4_properties,
+        "stored_for": property_url,
+    }
+
+    # If opened in a popup, close it and notify parent; otherwise return JSON
+    html_content = f"""<!DOCTYPE html><html><body>
+    <p>Google account connected successfully. You can close this window.</p>
+    <script>
+    if (window.opener) {{
+        window.opener.postMessage({json.dumps(result)}, '*');
+        window.close();
+    }}
+    </script></body></html>"""
+
+    from fastapi.responses import HTMLResponse as HTMLResp
+    return HTMLResp(content=html_content)
+
+
+@app.post("/api/auth/google/connect")
+async def google_auth_connect(
+    property_url: str = Body(...),
+    ga4_property_id: str | None = Body(None),
+    tokens: dict = Body(...),
+):
+    """Store tokens for a specific GSC property after the user selects it in the frontend."""
+    encrypted = encrypt_token(tokens)
+    await save_google_tokens(
+        property_url=property_url,
+        encrypted_tokens=encrypted,
+        ga4_property_id=ga4_property_id,
+        scopes=tokens.get("scope"),
+    )
+    return {"status": "connected", "property_url": property_url}
+
+
+@app.get("/api/auth/google/status")
+async def google_auth_status(property_url: str | None = None):
+    """Check if Google OAuth tokens exist. If property_url given, check that specific one."""
+    if property_url:
+        record = await get_google_tokens(property_url)
+        return {
+            "connected": record is not None,
+            "property_url": property_url,
+            "ga4_property_id": record.get("ga4_property_id") if record else None,
+            "email": record.get("email") if record else None,
+            "updated_at": record.get("updated_at") if record else None,
+        }
+    # List all connected properties
+    all_tokens = await list_google_tokens()
+    return {
+        "connected": len(all_tokens) > 0,
+        "properties": all_tokens,
+    }
+
+
+@app.delete("/api/auth/google/{property_url:path}")
+async def google_auth_disconnect(property_url: str):
+    """Disconnect (delete tokens for) a GSC property."""
+    await delete_google_tokens(property_url)
+    return {"status": "disconnected", "property_url": property_url}
+
+
+@app.get("/api/gsc/sites")
+async def get_gsc_sites(property_url: str):
+    """List GSC sites accessible with stored tokens for a given property."""
+    record = await get_google_tokens(property_url)
+    if not record:
+        raise HTTPException(status_code=404, detail="No tokens found for this property")
+    token_data = decrypt_token(record["encrypted_tokens"])
+    sites = await gsc_list_sites(token_data)
+    return {"sites": sites}
+
+
+@app.get("/api/gsc/pages")
+async def get_gsc_pages(
+    property_url: str,
+    start_date: str = "2025-01-01",
+    end_date: str = "2026-03-31",
+):
+    """Get all indexed pages for a GSC property with impressions/clicks data."""
+    record = await get_google_tokens(property_url)
+    if not record:
+        raise HTTPException(status_code=404, detail="No tokens found for this property")
+    token_data = decrypt_token(record["encrypted_tokens"])
+    pages = await gsc_get_all_pages(token_data, property_url, start_date, end_date)
+    return {"property_url": property_url, "total_pages": len(pages), "pages": pages}
+
+
+@app.get("/api/gsc/sitemaps")
+async def get_gsc_sitemaps(property_url: str):
+    """List sitemaps for a GSC property."""
+    record = await get_google_tokens(property_url)
+    if not record:
+        raise HTTPException(status_code=404, detail="No tokens found for this property")
+    token_data = decrypt_token(record["encrypted_tokens"])
+    sitemaps = await gsc_list_sitemaps(token_data, property_url)
+    return {"property_url": property_url, "sitemaps": sitemaps}
+
+
+@app.get("/api/ga4/traffic")
+async def get_ga4_traffic(
+    property_url: str,
+    start_date: str = "90daysAgo",
+    end_date: str = "today",
+):
+    """Get organic traffic per landing page from GA4."""
+    record = await get_google_tokens(property_url)
+    if not record:
+        raise HTTPException(status_code=404, detail="No tokens found for this property")
+    if not record.get("ga4_property_id"):
+        raise HTTPException(status_code=400, detail="No GA4 property linked for this GSC property")
+    token_data = decrypt_token(record["encrypted_tokens"])
+    traffic = await ga4_get_traffic_by_page(
+        token_data, record["ga4_property_id"], start_date, end_date
+    )
+    return {
+        "property_url": property_url,
+        "ga4_property_id": record["ga4_property_id"],
+        "total_pages": len(traffic),
+        "pages": traffic,
+    }
+
+
+# --- Link Graph & CMS Endpoints (Sprint 3C-F) ---
+
+@app.get("/api/audit/link-graph/{audit_id}")
+async def get_audit_link_graph(audit_id: str):
+    """Return the link graph data for D3 visualization.
+    Data is populated after DataForSEO crawl completes and link_graph_auditor runs."""
+    data = await get_link_graph_data(audit_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Link graph data not found for this audit")
+    return data
+
+
+@app.get("/api/audit/clusters/{audit_id}")
+async def get_audit_clusters(audit_id: str):
+    """Return topic cluster data for an audit."""
+    data = await get_link_graph_data(audit_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="No link graph data found for this audit")
+    return {
+        "audit_id": audit_id,
+        "clusters": data.get("clusters", []),
+        "industry": data.get("industry", {}),
+    }
+
+
+@app.get("/api/audit/cms/{audit_id}")
+async def get_audit_cms(audit_id: str):
+    """Return CMS detection result for an audit."""
+    graph_data = await get_link_graph_data(audit_id)
+    if graph_data and graph_data.get("cms_detection"):
+        return graph_data["cms_detection"]
+    raise HTTPException(status_code=404, detail="CMS detection data not found for this audit")
+
+
+@app.post("/api/audit/process-crawl/{audit_id}")
+async def process_crawl_results(audit_id: str, background_tasks: BackgroundTasks):
+    """Process completed DataForSEO crawl results: build link graph, detect clusters,
+    run NLP classification, and persist everything.
+    Called after DataForSEO pingback confirms crawl completion."""
+    task = await get_dataforseo_task_by_audit(audit_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="No DataForSEO task found for this audit")
+    if task["status"] != "completed":
+        raise HTTPException(status_code=409, detail=f"Crawl not yet completed (status: {task['status']})")
+
+    task_id = task["task_id"]
+    target_url = task["target_url"]
+
+    async def _process():
+        try:
+            dfs_client = DataForSEOClient()
+            pages_data = await dfs_client.get_all_pages(task_id)
+            links_data = await dfs_client.get_all_links(task_id)
+            await dfs_client.close()
+
+            logger.info(f"Processing crawl for audit {audit_id}: {len(pages_data)} pages, {len(links_data)} links")
+
+            # Build link graph analysis
+            graph_result = build_link_graph(
+                pages_data=pages_data,
+                links_data=links_data,
+                homepage_url=target_url,
+            )
+
+            # Save link graph edges to DB
+            edges_for_db = [
+                {
+                    "source_url": e["source"],
+                    "target_url": e["target"],
+                    "anchor_text": e.get("anchor", ""),
+                    "is_nofollow": e.get("is_nofollow", False),
+                    "link_position": e.get("link_type", ""),
+                }
+                for e in graph_result["graph"]["links"][:50000]
+            ]
+            await save_link_graph_edges(audit_id, edges_for_db)
+
+            # Save page content batch
+            page_content_batch = [
+                {
+                    "url": node["id"],
+                    "title": node.get("label", ""),
+                    "click_depth": node.get("depth"),
+                    "is_orphan": node.get("is_orphan", False),
+                }
+                for node in graph_result["graph"]["nodes"]
+            ]
+            await save_page_content_batch(audit_id, page_content_batch)
+
+            # Save industry detection if available
+            industry = graph_result.get("industry", {})
+            if industry.get("detected_industry"):
+                await save_industry_detection(
+                    audit_id,
+                    industry["detected_industry"],
+                    industry["confidence"],
+                    industry.get("categories", []),
+                )
+
+            logger.info(f"Crawl processing complete for audit {audit_id}")
+        except Exception as e:
+            logger.error(f"Failed to process crawl for audit {audit_id}: {e}")
+
+    background_tasks.add_task(_process)
+    return {"status": "processing", "audit_id": audit_id}
+
+
+# --- Content Intelligence Endpoints (Sprint 4) ---
+
+@app.get("/api/audit/wdf-idf/{audit_id}")
+async def get_wdf_idf(audit_id: str, keyword: str | None = None):
+    """Run or retrieve WDF*IDF gap analysis for an audit."""
+    pages = await get_page_content_for_audit(audit_id)
+    if not pages:
+        raise HTTPException(status_code=404, detail="No page content found for this audit")
+
+    # Use the first page with clean_text as the target
+    target_page = next((p for p in pages if p.get("clean_text") and len((p.get("clean_text") or "").split()) > 20), None)
+    if not target_page:
+        raise HTTPException(status_code=400, detail="No page has enough extracted content for WDF*IDF analysis")
+
+    result = await run_wdf_idf_analysis(
+        target_url=target_page["url"],
+        target_text=target_page["clean_text"],
+        target_keyword=keyword,
+    )
+    return result.to_dict()
+
+
+@app.get("/api/audit/interlinking/{audit_id}")
+async def get_interlinking(audit_id: str):
+    """Find interlinking opportunities for an audit's pages."""
+    pages = await get_page_content_for_audit(audit_id)
+    if not pages:
+        raise HTTPException(status_code=404, detail="No page content found for this audit")
+
+    pages_with_text = [
+        {"url": p["url"], "clean_text": p.get("clean_text") or "", "title": p.get("title") or ""}
+        for p in pages
+    ]
+
+    # Get existing links from link graph
+    graph_data = await get_link_graph_data(audit_id)
+    existing_links: set = set()
+    if graph_data:
+        for link in graph_data.get("links", []):
+            existing_links.add((link["source"], link["target"]))
+
+    result = find_interlinking_opportunities(pages_with_text, existing_links)
+    return result.to_dict()
+
+
+@app.get("/api/audit/content-profile/{audit_id}")
+async def get_content_profile(audit_id: str):
+    """Return content profile analysis for an audit's pages."""
+    pages = await get_page_content_for_audit(audit_id)
+    if not pages:
+        raise HTTPException(status_code=404, detail="No page content found for this audit")
+
+    profiles = []
+    for page in pages[:50]:  # cap at 50 pages for response size
+        clean_text = page.get("clean_text") or ""
+        if len(clean_text.split()) < 10:
+            continue
+        profile = build_content_profile(
+            page["url"], clean_text, page.get("h1_text"), page.get("title"),
+        )
+        # Enrich with existing NLP data if available
+        if page.get("nlp_primary_entity"):
+            profile.primary_entity = page["nlp_primary_entity"]
+            profile.primary_entity_salience = page.get("nlp_primary_entity_salience")
+            profile.entity_focus_aligned = page.get("nlp_entity_focus_aligned")
+        if page.get("nlp_sentiment_score") is not None:
+            profile.sentiment_score = page["nlp_sentiment_score"]
+            profile.sentiment_magnitude = page.get("nlp_sentiment_magnitude")
+        profiles.append(profile.to_dict())
+
+    return {"audit_id": audit_id, "total_pages": len(profiles), "profiles": profiles}
+
+
+@app.get("/api/audit/migration/{audit_id}")
+async def get_audit_migration(audit_id: str):
+    """Return CMS migration assessment for an audit."""
+    assessment = await get_migration_assessment(audit_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail="No migration assessment for this audit (may be a Webflow site)")
+    return assessment
+
+
+# --- Knowledge Base Export (Sprint 5A) ---
+
+@app.post("/api/audit/knowledge-base/{audit_id}")
+async def export_knowledge_base(audit_id: str):
+    """Generate RAG-ready knowledge base from a premium audit.
+    Returns a JSON Lines file for vector DB ingestion."""
+    # Fetch the audit report from history
+    from db_router import get_page_content_for_audit as get_pages
+    pages = await get_pages(audit_id)
+
+    # Get the report from the audits table
+    migration = await get_migration_assessment(audit_id)
+
+    # We need the full report — fetch from audit history
+    import db_postgres as db_pg
+    if os.environ.get("DATABASE_URL"):
+        pool = await db_pg.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT url, report_json FROM audits WHERE id = $1",
+                __import__("uuid").UUID(audit_id),
+            )
+        if not row:
+            raise HTTPException(status_code=404, detail="Audit not found")
+        report = json.loads(row["report_json"]) if isinstance(row["report_json"], str) else row["report_json"]
+        site_url = row["url"]
+    else:
+        raise HTTPException(status_code=501, detail="Knowledge base export requires PostgreSQL")
+
+    webflow_fixes = report.get("webflow_fixes")
+
+    docs = generate_knowledge_base(
+        audit_id=audit_id,
+        site_url=site_url,
+        report=report,
+        pages=pages if pages else None,
+        webflow_fixes=webflow_fixes,
+        migration=migration,
+    )
+
+    jsonl_bytes = export_jsonl_bytes(docs)
+    safe_url = site_url.replace("https://", "").replace("http://", "").replace("/", "_").strip("_")
+    filename = f"WAIO_KB_{safe_url}_{audit_id[:8]}.jsonl"
+
+    return Response(
+        content=jsonl_bytes,
+        media_type="application/jsonlines",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# --- Cross-Audit Intelligence (Sprint 5B) ---
+
+@app.get("/api/intelligence/summary")
+async def get_intelligence_summary():
+    """Comprehensive cross-audit intelligence summary."""
+    if not os.environ.get("DATABASE_URL"):
+        raise HTTPException(status_code=501, detail="Intelligence queries require PostgreSQL")
+    return await cross_audit_queries.get_intelligence_summary()
+
+
+@app.get("/api/intelligence/benchmarks/pillars")
+async def get_pillar_benchmarks(tier: str | None = None):
+    """Average scores by pillar across all audits."""
+    if not os.environ.get("DATABASE_URL"):
+        raise HTTPException(status_code=501, detail="Intelligence queries require PostgreSQL")
+    return {"benchmarks": await cross_audit_queries.get_average_scores_by_pillar(tier)}
+
+
+@app.get("/api/intelligence/benchmarks/cms")
+async def get_cms_benchmarks():
+    """Average scores grouped by detected CMS platform."""
+    if not os.environ.get("DATABASE_URL"):
+        raise HTTPException(status_code=501, detail="Intelligence queries require PostgreSQL")
+    return {"benchmarks": await cross_audit_queries.get_scores_by_cms()}
+
+
+@app.get("/api/intelligence/benchmarks/industry")
+async def get_industry_benchmarks():
+    """Average scores grouped by NLP-detected industry."""
+    if not os.environ.get("DATABASE_URL"):
+        raise HTTPException(status_code=501, detail="Intelligence queries require PostgreSQL")
+    return {"benchmarks": await cross_audit_queries.get_scores_by_industry()}
+
+
+@app.get("/api/intelligence/benchmarks/industry/{industry:path}")
+async def get_industry_detail(industry: str):
+    """Detailed pillar benchmarks for a specific industry."""
+    if not os.environ.get("DATABASE_URL"):
+        raise HTTPException(status_code=501, detail="Intelligence queries require PostgreSQL")
+    return await cross_audit_queries.get_industry_pillar_benchmarks(industry)
+
+
+@app.get("/api/intelligence/findings")
+async def get_common_findings(cms: str | None = None, limit: int = 20):
+    """Most common findings, optionally filtered by CMS."""
+    if not os.environ.get("DATABASE_URL"):
+        raise HTTPException(status_code=501, detail="Intelligence queries require PostgreSQL")
+    return {"findings": await cross_audit_queries.get_common_findings(cms, min(limit, 100))}
+
+
+@app.get("/api/intelligence/severity")
+async def get_severity_by_cms():
+    """Finding severity distribution grouped by CMS."""
+    if not os.environ.get("DATABASE_URL"):
+        raise HTTPException(status_code=501, detail="Intelligence queries require PostgreSQL")
+    return {"distribution": await cross_audit_queries.get_severity_distribution_by_cms()}
+
+
+@app.get("/api/intelligence/trend")
+async def get_score_trend(url: str):
+    """Score history for a URL across all audits."""
+    if not os.environ.get("DATABASE_URL"):
+        raise HTTPException(status_code=501, detail="Intelligence queries require PostgreSQL")
+    return {"url": url, "trend": await cross_audit_queries.get_score_trend(url)}
+
+
+# --- Export ---
 
 @app.post("/api/export/pdf")
 async def export_pdf(request: ExportRequest):

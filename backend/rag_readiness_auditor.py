@@ -16,6 +16,7 @@ References:
 from bs4 import BeautifulSoup, Tag  # type: ignore
 import re
 from typing import Dict, Any, List
+from utils import make_element_entry
 
 
 def run_rag_readiness_audit(soup: BeautifulSoup, html_content: str) -> Dict[str, Any]:
@@ -118,6 +119,7 @@ def _get_text_sections(soup: BeautifulSoup) -> List[Dict[str, Any]]:
         sections.append({
             "heading": heading_text,
             "heading_level": heading_level,
+            "heading_element": heading,
             "text": section_text,
             "word_count": word_count
         })
@@ -161,13 +163,17 @@ def check_section_length(soup: BeautifulSoup) -> Dict[str, Any]:
     avg_words = sum(s["word_count"] for s in sections) / len(sections) if sections else 0
 
     if too_long:
-        findings.append(create_finding(
+        f = create_finding(
             "high",
             f"Found {len(too_long)} section(s) exceeding 800 words. Longest section has {max(s['word_count'] for s in too_long)} words.",
             "Break up long sections into smaller subsections of 100-300 words each, each with its own descriptive heading.",
             "https://keomarketing.com/query-fan-out-b2b-seo-strategy/",
             "AI models fan out a single user query into 7-12 sub-queries (Stanford HAI). Well-defined content sections are essential for your content to be retrieved and cited across these sub-queries."
-        ))
+        )
+        els = [s["heading_element"] for s in too_long if s.get("heading_element")]
+        if els:
+            f["elements"] = [make_element_entry(el) for el in els[:3]]
+        findings.append(f)
 
     short_with_headings = [s for s in too_short if s["heading"]]
     if len(short_with_headings) > 3:
@@ -329,19 +335,25 @@ def check_heading_content_pairing(soup: BeautifulSoup) -> Dict[str, Any]:
     findings = []
 
     orphan_headings: List[str] = []
+    orphan_heading_els = []
     for s in sections:
         if s["heading"] and s["word_count"] < 5:
             orphan_headings.append(str(s["heading"]))
+            if s.get("heading_element"):
+                orphan_heading_els.append(s["heading_element"])
 
     if len(orphan_headings) > 2:
         examples = orphan_headings[:3]  # type: ignore
-        findings.append(create_finding(
+        f = create_finding(
             "medium",
             f"Found {len(orphan_headings)} headings with little or no content following them (e.g., '{examples[0]}').",
             "Ensure every heading is followed by at least one paragraph of descriptive content. Remove decorative headings that serve no informational purpose.",
             "https://www.w3.org/WAI/tutorials/page-structure/headings/",
             "Orphan headings create empty chunks in RAG systems. An AI agent retrieving a chunk with only a heading and no content cannot generate a useful answer."
-        ))
+        )
+        if orphan_heading_els:
+            f["elements"] = [make_element_entry(el) for el in orphan_heading_els[:3]]
+        findings.append(f)
 
     # Check for content without headings (large blocks)
     body = soup.find('body')
@@ -407,20 +419,24 @@ def check_structured_content(soup: BeautifulSoup) -> Dict[str, Any]:
 
     # Check tables for headers
     tables_without_headers: int = 0
+    tables_without_headers_els = []
     for table in tables:
         thead = table.find('thead')
         th_elements = table.find_all('th')
         if not thead and not th_elements:
             tables_without_headers = tables_without_headers + 1  # type: ignore
+            tables_without_headers_els.append(table)
 
     if tables_without_headers > 0:
-        findings.append(create_finding(
+        f = create_finding(
             "medium",
             f"Found {tables_without_headers} table(s) without header rows (<thead> or <th>).",
             "Add <thead> and <th> elements to all data tables. This allows AI agents to understand column semantics when parsing table data.",
             "https://www.w3.org/WAI/tutorials/tables/",
             "Tables without headers are opaque to AI agents — they cannot determine what each column represents."
-        ))
+        )
+        f["elements"] = [make_element_entry(t) for t in tables_without_headers_els[:3]]
+        findings.append(f)
 
     details = {
         "list_count": len(lists),

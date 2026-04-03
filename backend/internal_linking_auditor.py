@@ -19,6 +19,7 @@ All checks are deterministic and code-based. Zero LLM dependency.
 from bs4 import BeautifulSoup
 from typing import Dict, Any, Optional
 from urllib.parse import urlparse
+from utils import make_element_entry
 
 def run_internal_linking_audit(soup: BeautifulSoup, html_content: str, url: str, site_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     checks = {}
@@ -115,29 +116,34 @@ def check_anchor_text_quality(soup: BeautifulSoup, url: str) -> Dict[str, Any]:
     vague_links = []
     duplicate_anchors = {}
     
+    vague_link_els = []
+
     for a in a_tags:
         if not is_internal(a['href'], url):
             continue
-            
+
         text = a.get_text().strip().lower()
         if text in vague_texts:
             vague_links.append(text)
-            
+            vague_link_els.append(a)
+
         href = a['href']
         if text and len(text) > 3:
             if text not in duplicate_anchors:
                 duplicate_anchors[text] = set()
             duplicate_anchors[text].add(href)
-            
+
     if vague_links:
         count = len(vague_links)
-        findings.append(create_finding(
+        f = create_finding(
             severity="medium",
             description=f"Found {count} internal links with vague anchor text (e.g. 'read more').",
             recommendation="Use descriptive anchor text to give search engines and users better context.",
             reference="https://developers.google.com/search/docs/fundamentals/seo-starter-guide#use-links-wisely",
             credibility_anchor="Vague anchors miss SEO opportunities for semantic relevance."
-        ))
+        )
+        f["elements"] = [make_element_entry(a) for a in vague_link_els[:5]]
+        findings.append(f)
         
     misleading_anchors = {k: v for k, v in duplicate_anchors.items() if len(v) > 1}
     if misleading_anchors:
@@ -164,20 +170,24 @@ def check_self_referencing_links(soup: BeautifulSoup, url: str) -> Dict[str, Any
     
     a_tags = soup.find_all('a', href=True)
     self_links = 0
-    
+    self_link_els = []
+
     for a in a_tags:
         href = a['href']
         if href == url or href == current_path:
             self_links += 1
-            
+            self_link_els.append(a)
+
     if self_links > 2:
-        findings.append(create_finding(
+        f = create_finding(
             severity="medium",
             description=f"Found {self_links} self-referencing links pointing to the current page.",
             recommendation="Remove interactive links that point to the current page (e.g., active state menu items should not be clickable links).",
             reference="https://www.screamingfrog.co.uk/seo-spider/",
             credibility_anchor="Self-referencing links waste crawl budget and offer poor UX."
-        ))
+        )
+        f["elements"] = [make_element_entry(a) for a in self_link_els[:5]]
+        findings.append(f)
         
     return {
         "status": "pass" if not findings else "fail",
@@ -193,13 +203,15 @@ def check_nofollow_internal_links(soup: BeautifulSoup, url: str) -> Dict[str, An
     count = len(nofollow_internal)
     
     if count > 0:
-        findings.append(create_finding(
+        f = create_finding(
             severity="high",
             description=f"Found {count} internal links with rel='nofollow' attribute.",
             recommendation="Remove rel='nofollow' from internal links to allow link equity to flow freely throughout your site.",
             reference="https://developers.google.com/search/docs/fundamentals/seo-starter-guide#use-links-wisely",
             credibility_anchor="Google explicitly recommends against nofollowing internal links."
-        ))
+        )
+        f["elements"] = [make_element_entry(a) for a in nofollow_internal[:5]]
+        findings.append(f)
         
     return {
         "status": "pass" if not findings else "fail",

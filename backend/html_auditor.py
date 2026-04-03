@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup, Tag
 import re
 from typing import Dict, Any, List
+from utils import make_element_entry
 
 def run_html_audit(soup: BeautifulSoup, html_content: str) -> Dict[str, Any]:
     checks = {}
@@ -147,13 +148,15 @@ def check_single_h1(soup: BeautifulSoup) -> Dict[str, Any]:
         ))
         status = "fail"
     elif count > 1:
-        findings.append(create_finding(
+        f = create_finding(
             "high",
             f"Multiple ({count}) H1 tags found on the page.",
             "Ensure exactly one H1 tag per page. Change other H1s to H2 or lower.",
             "https://developers.google.com/search/docs/fundamentals/seo-starter-guide#use-heading-tags",
             anchor
-        ))
+        )
+        f["elements"] = [make_element_entry(h) for h in h1_tags]
+        findings.append(f)
         status = "fail"
 
     res = {
@@ -173,22 +176,24 @@ def check_heading_hierarchy(soup: BeautifulSoup) -> Dict[str, Any]:
     hierarchy = [int(h.name[1]) for h in headings]
     skips = []
     anchor = "Pages with well-organized headings are 2.8x more likely to earn citations in AI search results (AirOps, 2026)."
-    
+
     expected_level = 1
-    for level in hierarchy:
+    for idx, level in enumerate(hierarchy):
         if level > expected_level + 1:
-            skips.append((expected_level, level))
+            skips.append((expected_level, level, idx))
         expected_level = level
 
     findings = []
     for skip in skips:
-        findings.append(create_finding(
+        f = create_finding(
             "high",
             f"Heading level skipped. Jumped from H{skip[0]} to H{skip[1]}.",
             "Heading levels should be sequential. Do not skip levels.",
             "https://www.w3.org/WAI/tutorials/page-structure/headings/",
             anchor
-        ))
+        )
+        f["elements"] = [make_element_entry(headings[skip[2]])]
+        findings.append(f)
         
     res = {
         "status": "pass" if not findings else "fail",
@@ -293,12 +298,15 @@ def check_image_alt_coverage(soup: BeautifulSoup) -> Dict[str, Any]:
     findings = []
     
     if total > 0 and coverage < 1.0:
-        findings.append(create_finding(
+        f = create_finding(
             "high",
             f"Missing alt text on {total - with_alt} out of {total} images (Coverage: {coverage:.0%}).",
             "Provide descriptive alt text for all meaningful images. Use empty alt=\"\" for decorative only.",
             "https://www.w3.org/TR/WCAG21/#non-text-content"
-        ))
+        )
+        missing = [img for img in images if not img.has_attr('alt') or img['alt'].strip() == '']
+        f["elements"] = [make_element_entry(img) for img in missing[:5]]
+        findings.append(f)
         
     res = {
         "status": "pass" if not findings else "fail",
@@ -319,6 +327,7 @@ def check_image_alt_coverage(soup: BeautifulSoup) -> Dict[str, Any]:
 def check_form_accessibility(soup: BeautifulSoup) -> Dict[str, Any]:
     inputs = soup.find_all(['input', 'textarea', 'select'])
     missing = 0
+    missing_els = []
     total = len(inputs)
     
     for el in inputs:
@@ -341,15 +350,18 @@ def check_form_accessibility(soup: BeautifulSoup) -> Dict[str, Any]:
         
         if not (has_aria_label or has_linked_label or is_wrapped):
             missing += 1
+            missing_els.append(el)
 
     findings = []
     if missing > 0:
-        findings.append(create_finding(
+        f = create_finding(
             "high",
             f"{missing} form inputs are missing associated <label> or aria-label.",
             "Ensure every form input has a linked <label for=\"id\"> or an aria-label attribute.",
             "https://www.w3.org/TR/WCAG21/#info-and-relationships"
-        ))
+        )
+        f["elements"] = [make_element_entry(el) for el in missing_els[:5]]
+        findings.append(f)
 
     res = {
         "status": "pass" if missing == 0 else "fail",
@@ -373,30 +385,39 @@ def check_link_quality(soup: BeautifulSoup) -> Dict[str, Any]:
     
     generic_words = ["click here", "read more", "learn more", "more", "here", "link"]
     
+    bad_href_els = []
+    generic_text_els = []
+
     for a in links:
         href = a.get('href', '').strip()
         if not href or href == '#' or href.startswith('javascript:void(0)'):
             bad_hrefs += 1
-            
+            bad_href_els.append(a)
+
         text = a.get_text().strip().lower()
         if text in generic_words:
             generic_text += 1
-            
+            generic_text_els.append(a)
+
     findings = []
     if bad_hrefs > 0:
-        findings.append(create_finding(
+        f = create_finding(
             "medium",
             f"Found {bad_hrefs} links with empty href, \"#\", or \"javascript:void(0)\".",
             "Ensure all <a> tags have a valid URL in their href attribute.",
             "https://developers.google.com/search/docs/fundamentals/seo-starter-guide#links"
-        ))
+        )
+        f["elements"] = [make_element_entry(a) for a in bad_href_els[:5]]
+        findings.append(f)
     if generic_text > 0:
-        findings.append(create_finding(
+        f = create_finding(
             "medium",
             f"Found {generic_text} links with generic anchor text (e.g., 'click here', 'read more').",
             "Use descriptive anchor text that provides context about the link destination.",
             "https://developers.google.com/search/docs/fundamentals/seo-starter-guide#write-good-link-text"
-        ))
+        )
+        f["elements"] = [make_element_entry(a) for a in generic_text_els[:5]]
+        findings.append(f)
         
     res = {
         "status": "pass" if not findings else "fail",
