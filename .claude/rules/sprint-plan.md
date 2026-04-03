@@ -205,6 +205,16 @@ Total API cost per premium audit: ~$3-20 depending on page count and NLP depth. 
 
 ---
 
+6. Sprint 6: Frontend UI/UX Redesign (see .claude/rules/frontend-redesign.md)
+   - 6A: TailwindCSS 4 Theme + Design System
+   - 6B: React Router Restructure
+   - 6C: Audit Form Redesign (Tab Selector)
+   - 6D: Free Report Redesign (Hint Cards + Blurred Premium)
+   - 6E: Premium Dashboard (Sidebar + Overview)
+   - 6F: Link Graph Visualization
+   - 6G: Export System (PDF/Excel/MD)
+   - 6H: Audit Streaming UX
+
 ## Phase 2 Upgrade: Firecrawl (when WAIO Agent development begins)
 
 When the embeddable AI chat agent moves into development:
@@ -212,3 +222,4 @@ When the embeddable AI chat agent moves into development:
 2. Replace Trafilatura in RAG pipeline only
 3. Keep Trafilatura for competitor extraction in audit tool
 4. Google NLP data carries forward into agent knowledge base
+
