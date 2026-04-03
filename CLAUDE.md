@@ -14,7 +14,7 @@ WAIO (Website AI Optimization) Audit Tool by Veza Digital. A 10-pillar determini
 - **Keep the existing codebase.** Do NOT rewrite or create a new project. All upgrades build on existing modules.
 - **CMS-agnostic core.** All 10 audit pillars analyze rendered HTML/CSS/JS output, not CMS source code. They work identically on any platform. CMS-specific intelligence is a separate layer on top.
 - **Auditor interface contract:** Every auditor takes `(soup, html_content, url)` or similar, returns `{"checks": {}, "positive_findings": [], "findings": []}`.
-- **Zero AI dependency for core audit pillars.** The 10 deterministic pillars must never call an LLM API. AI features (fix generator, personas) are separate premium layers.
+- **Zero AI dependency for core audit pillars.** The 10 deterministic pillars must never call an LLM API. AI features (fix generator, personas) are separate premium layers. Google NLP API is a premium-only intelligence layer — not a core pillar dependency.
 - **Findings must include:** severity, description, recommendation, reference, credibility_anchor (evidence-based data point from a verified study).
 - **Positive findings matter.** When something is correct, acknowledge it with a credibility anchor.
 
@@ -34,23 +34,24 @@ WAIO (Website AI Optimization) Audit Tool by Veza Digital. A 10-pillar determini
 ## Two-Tier System
 
 - **Free tier** (`tier: "free"`): Existing 10-pillar analysis, up to 50 pages, PDF/MD export. Lead gen tool.
-- **Premium tier** (`tier: "premium"`): Everything in free + full-site crawl (up to 2,000 pages default, 5,000 max), CMS detection, GSC/GA4 integration, DataForSEO crawl, competitor WDF*IDF, link graph visualization, executive summary, Webflow fix instructions, CMS-specific migration intelligence.
+- **Premium tier** (`tier: "premium"`): Everything in free + full-site crawl (up to 2,000 pages default, 5,000 max), CMS detection, GSC/GA4 integration, DataForSEO crawl, competitor WDF*IDF, link graph visualization, executive summary, Webflow fix instructions, CMS-specific migration intelligence, Google NLP content intelligence.
 
 ## API Stack (Premium Tier Only)
 
 - **DataForSEO On-Page API** — site crawling, link graph, orphan detection, 120+ SEO metrics (~$2.50/2,000 pages with JS rendering)
 - **DataForSEO SERP API or SerpApi** — competitor URLs for WDF*IDF (~$0.06/audit)
+- **Google Cloud Natural Language API** — entity analysis with salience scores, content classification (1,091 categories), sentiment analysis. Powered by Google's own NLP models (~$0-10/audit using free tier strategically)
 - **Trafilatura** — clean content extraction from any CMS (free, in-process, no API key)
 - **Google Search Console API** — indexed URLs, search performance (free, OAuth required)
 - **Google GA4 Data API** — traffic per URL for orphan prioritization (free, OAuth required)
-- Total API cost per premium audit: ~$3-10 (scales with page count)
+- Total API cost per premium audit: ~$3-20 (scales with page count and NLP depth)
 
 ## Sprint Plan (see .claude/rules/sprint-plan.md for details)
 
 1. **Sprint 1:** PostgreSQL migration + normalized schema + audit tier system ✅
 2. **Sprint 2:** Executive summary generator + Webflow fix knowledge base + competitor benchmarking ✅
-3. **Sprint 3:** DataForSEO On-Page API + CMS detection + site-wide link graph + D3 network visualization + GSC/GA4 OAuth
-4. **Sprint 4:** Trafilatura content extraction + WDF*IDF pipeline + page-pair interlinking + content profile + CMS migration intelligence
+3. **Sprint 3:** DataForSEO On-Page API + CMS detection + site-wide link graph + D3 network visualization + GSC/GA4 OAuth + Google NLP topic cluster validation
+4. **Sprint 4:** Trafilatura content extraction + WDF*IDF pipeline + page-pair interlinking + Google NLP content profile + CMS migration intelligence
 5. **Sprint 5:** Knowledge base generator for RAG (bridge to Phase 2 WAIO Agent)
 
 ## Page Limits
@@ -58,7 +59,6 @@ WAIO (Website AI Optimization) Audit Tool by Veza Digital. A 10-pillar determini
 - **Free tier:** up to 50 pages (existing `site_crawler.py`)
 - **Premium tier default:** up to 2,000 pages (via DataForSEO)
 - **Premium tier max:** up to 5,000 pages (configurable per audit, higher cost)
-- At $4,500 per audit, even a 5,000-page crawl costs < $22 in API fees (< 0.5% of revenue)
 
 ## Supported CMS Platforms
 
@@ -100,6 +100,7 @@ git push origin main  # Railway auto-deploys from main branch
 - `backend/db_router.py` — Auto-selects PostgreSQL or SQLite based on DATABASE_URL
 - `backend/db_postgres.py` — Async PostgreSQL module (production)
 - `backend/db.py` — SQLite module (local dev fallback)
+- `backend/dataforseo_client.py` — Async DataForSEO On-Page API client (Sprint 3A)
 - `backend/site_crawler.py` — Multi-page crawl engine, up to 50 pages (free tier)
 - `backend/competitive_auditor.py` — Concurrent audit of primary + up to 4 competitors
 - `backend/executive_summary_generator.py` — Template-based executive summary (Sprint 2A)
