@@ -29,7 +29,7 @@ from pdf_generator import generate_pdf
 from md_generator import generate_markdown
 from email_sender import send_report_email
 from db_router import (init_db, close_db, create_job, get_job_status, get_single_page_audit,
-                       save_audit_history, get_audit_history,
+                       save_audit_history, get_audit_history, get_audit_by_id, list_all_audits,
                        create_schedule, get_schedules, update_schedule, delete_schedule,
                        save_dataforseo_task, update_dataforseo_task,
                        get_dataforseo_task, get_dataforseo_task_by_audit,
@@ -200,7 +200,8 @@ async def perform_audit(request: AuditRequest):
         # Premium modules will be added in later sprints (executive summary, fix KB, etc.)
 
         # Auto-save to audit history
-        await save_audit_history(url, "single", report.get("overall_score", 0), report.get("overall_label", "N/A"), report, tier=tier)
+        audit_id = await save_audit_history(url, "single", report.get("overall_score", 0), report.get("overall_label", "N/A"), report, tier=tier)
+        report["audit_id"] = str(audit_id)
 
         return report
 
@@ -231,8 +232,9 @@ async def perform_competitive_audit(request: CompetitiveRequest):
         
         # Auto-save primary to history
         p = result.get("primary", {})
-        await save_audit_history(primary, "competitive", p.get("overall_score", 0), p.get("overall_label", "N/A"), result)
-        
+        audit_id = await save_audit_history(primary, "competitive", p.get("overall_score", 0), p.get("overall_label", "N/A"), result)
+        result["audit_id"] = str(audit_id)
+
         return result
     except Exception as e:
         logger.error(f"Competitive audit failed: {e}")
@@ -436,6 +438,29 @@ async def fetch_single_page_audit(job_id: str, url: str):
 async def get_history(url: str):
     history = await get_audit_history(url)
     return {"url": url, "history": history}
+
+
+@app.get("/api/audit/report/{audit_id}")
+async def get_audit_report(audit_id: str):
+    """Retrieve a saved audit report by ID."""
+    record = await get_audit_by_id(audit_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    # Return the full report JSON directly (same shape the frontend expects)
+    report = record["report_json"]
+    report["audit_id"] = record["id"]
+    return report
+
+
+@app.get("/api/audits")
+async def get_all_audits(
+    limit: int = 100, offset: int = 0,
+    user=Depends(get_current_user),
+):
+    """List all audits. Requires authentication."""
+    audits = await list_all_audits(limit=limit, offset=offset)
+    return {"audits": audits, "total": len(audits)}
+
 
 @app.post("/api/schedules")
 async def create_new_schedule(request: ScheduleRequest):

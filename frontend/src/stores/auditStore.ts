@@ -15,6 +15,7 @@ interface AuditState {
     tier?: 'free' | 'premium'
   ) => Promise<void>;
   loadReport: (jobId: string, pageUrl: string) => Promise<void>;
+  fetchReport: (auditId: string) => Promise<void>;
   clearAudit: () => void;
 }
 
@@ -97,6 +98,24 @@ export const useAuditStore = create<AuditState>((set) => ({
       if (!res.ok) throw new Error('Report not found');
       const data = await res.json();
       set({ report: data, isLoading: false });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load report';
+      set({ error: msg, isLoading: false });
+    }
+  },
+
+  fetchReport: async (auditId: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const res = await fetch(`${apiBase}/api/audit/report/${auditId}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        if (res.status === 404) throw new Error('Audit report not found');
+        throw new Error('Failed to load audit report');
+      }
+      const data = await res.json();
+      set({ report: data, isLoading: false, auditedUrl: data.url || '' });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to load report';
       set({ error: msg, isLoading: false });

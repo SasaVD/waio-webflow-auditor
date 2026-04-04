@@ -1,4 +1,5 @@
-import { useNavigate } from 'react-router';
+import { useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router';
 import { useAuditStore } from '../stores/auditStore';
 import { AuditReport } from '../components/AuditReport';
 import { SiteAuditReport } from '../components/SiteAuditReport';
@@ -7,7 +8,15 @@ import { LoadingState } from '../components/LoadingState';
 
 export function AuditReportPage() {
   const navigate = useNavigate();
-  const { report, isLoading, auditedUrl } = useAuditStore();
+  const { auditId } = useParams();
+  const { report, isLoading, error, auditedUrl, fetchReport } = useAuditStore();
+
+  // If no report in memory and we have an audit ID, fetch from API
+  useEffect(() => {
+    if (!report && !isLoading && auditId && auditId !== 'latest') {
+      fetchReport(auditId);
+    }
+  }, [auditId, report, isLoading, fetchReport]);
 
   const handleNewAudit = () => {
     navigate('/');
@@ -22,7 +31,7 @@ export function AuditReportPage() {
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-6">
         <p className="text-lg font-semibold text-text mb-2">Report Not Available</p>
         <p className="text-text-secondary mb-6 text-sm">
-          This audit report is no longer in memory. Run a new audit to generate fresh results.
+          {error || 'This audit report could not be loaded. Run a new audit to generate fresh results.'}
         </p>
         <button
           onClick={handleNewAudit}

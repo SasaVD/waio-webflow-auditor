@@ -79,16 +79,12 @@ export const AuditForm: React.FC<AuditFormProps> = ({
     if (activeTab === 'single') {
       onRunAudit(submitUrl, 'single', [], 'free');
     } else {
-      // Full Site tab — competitive if competitors provided, otherwise site crawl
+      // Comprehensive Audit tab — always uses premium endpoint
       const validCompetitors = competitors
         .filter((c) => c.trim())
         .map((c) => normalizeUrl(c));
 
-      if (validCompetitors.length > 0) {
-        onRunAudit(submitUrl, 'competitive', validCompetitors, 'premium');
-      } else {
-        onRunAudit(submitUrl, 'site', [], 'premium');
-      }
+      onRunAudit(submitUrl, 'single', validCompetitors, 'premium');
     }
   };
 

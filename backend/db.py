@@ -150,6 +150,55 @@ async def get_latest_history_score(url: str) -> Optional[int]:
             row = await cursor.fetchone()
             return row[0] if row else None
 
+
+async def get_audit_by_id(audit_id) -> Optional[Dict[str, Any]]:
+    """Retrieve a full audit by its ID (SQLite fallback)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, url, audit_type, overall_score, overall_label, report_json, created_at FROM audit_history WHERE id = ?",
+            (str(audit_id),)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            report = row[5]
+            if isinstance(report, str):
+                report = json.loads(report)
+            return {
+                "id": str(row[0]),
+                "url": row[1],
+                "tier": "free",
+                "audit_type": row[2],
+                "overall_score": row[3],
+                "overall_label": row[4],
+                "report_json": report,
+                "created_at": row[6],
+                "detected_cms": None,
+            }
+
+
+async def list_all_audits(limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    """List all audits (SQLite fallback)."""
+    results: List[Dict[str, Any]] = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, url, audit_type, overall_score, overall_label, created_at FROM audit_history ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset)
+        ) as cursor:
+            async for row in cursor:
+                results.append({
+                    "id": str(row[0]),
+                    "url": row[1],
+                    "tier": "free",
+                    "audit_type": row[2],
+                    "overall_score": row[3],
+                    "overall_label": row[4],
+                    "created_at": row[5],
+                    "detected_cms": None,
+                })
+    return results
+
+
 # --- Scheduled Audits ---
 
 async def create_schedule(url: str, email: str, frequency: str, max_pages: int) -> int:

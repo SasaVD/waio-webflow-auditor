@@ -26,7 +26,12 @@ export function LandingPage() {
     const unsub = useAuditStore.subscribe((state, prev) => {
       if (state.report && !state.isLoading && (!prev.report || prev.isLoading)) {
         const id = state.report.audit_id || state.report.job_id || 'latest';
-        navigate(`/audit/${id}`);
+        const isPremium = state.report.tier === 'premium' || state.report.executive_summary;
+        if (isPremium) {
+          navigate(`/dashboard/${id}`);
+        } else {
+          navigate(`/audit/${id}`);
+        }
       }
     });
     return unsub;

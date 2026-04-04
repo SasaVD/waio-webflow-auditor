@@ -250,6 +250,59 @@ async def get_latest_history_score(url: str) -> Optional[int]:
     return row["overall_score"] if row else None
 
 
+async def get_audit_by_id(audit_id) -> Optional[Dict[str, Any]]:
+    """Retrieve a full audit (including report_json) by its UUID."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT id, url, tier, audit_type, overall_score, overall_label,
+                      report_json, created_at, detected_cms
+               FROM audits WHERE id = $1""",
+            audit_id if isinstance(audit_id, uuid.UUID) else uuid.UUID(str(audit_id)),
+        )
+    if not row:
+        return None
+    report = row["report_json"]
+    if isinstance(report, str):
+        report = json.loads(report)
+    return {
+        "id": str(row["id"]),
+        "url": row["url"],
+        "tier": row["tier"],
+        "audit_type": row["audit_type"],
+        "overall_score": row["overall_score"],
+        "overall_label": row["overall_label"],
+        "report_json": report,
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "detected_cms": row["detected_cms"],
+    }
+
+
+async def list_all_audits(limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    """List all audits (admin view) ordered by most recent first."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, url, tier, audit_type, overall_score, overall_label,
+                      created_at, detected_cms
+               FROM audits ORDER BY created_at DESC LIMIT $1 OFFSET $2""",
+            limit, offset,
+        )
+    return [
+        {
+            "id": str(row["id"]),
+            "url": row["url"],
+            "tier": row["tier"],
+            "audit_type": row["audit_type"],
+            "overall_score": row["overall_score"],
+            "overall_label": row["overall_label"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "detected_cms": row["detected_cms"],
+        }
+        for row in rows
+    ]
+
+
 # --- Scheduled Audits ---
 
 async def create_schedule(url: str, email: str, frequency: str, max_pages: int) -> int:

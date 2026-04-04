@@ -16,7 +16,13 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api.dataforseo.com/v3/on_page"
+_USE_SANDBOX = os.environ.get("DATAFORSEO_USE_SANDBOX", "").lower() in ("true", "1", "yes")
+BASE_URL = "https://sandbox.dataforseo.com/v3/on_page" if _USE_SANDBOX else "https://api.dataforseo.com/v3/on_page"
+
+if _USE_SANDBOX:
+    logger.info("Using DataForSEO SANDBOX mode")
+else:
+    logger.info("Using DataForSEO LIVE mode")
 
 
 class DataForSEOError(Exception):

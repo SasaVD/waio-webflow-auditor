@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, Link, useParams, useLocation } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as Collapsible from '@radix-ui/react-collapsible';
+import { useAuditStore } from '../stores/auditStore';
 import {
   LayoutDashboard,
   ArrowLeft,
@@ -87,8 +88,16 @@ const navGroups: NavGroup[] = [
 export default function DashboardLayout() {
   const { auditId } = useParams();
   const location = useLocation();
+  const { report, isLoading, fetchReport } = useAuditStore();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Fetch audit data from API if not in memory
+  useEffect(() => {
+    if (!report && !isLoading && auditId) {
+      fetchReport(auditId);
+    }
+  }, [auditId, report, isLoading, fetchReport]);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(navGroups.map((g) => [g.label, true]))
   );

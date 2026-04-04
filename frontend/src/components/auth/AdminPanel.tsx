@@ -9,6 +9,8 @@ import {
   AlertCircle,
   CheckCircle2,
   X,
+  History,
+  ExternalLink,
 } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 import { useNavigate } from 'react-router';
@@ -27,10 +29,30 @@ interface UserRecord {
   last_login: string | null;
 }
 
+interface AuditRecord {
+  id: string;
+  url: string;
+  tier: string;
+  audit_type: string;
+  overall_score: number;
+  overall_label: string;
+  created_at: string;
+  detected_cms: string | null;
+}
+
+const scoreColor = (score: number): string => {
+  if (score >= 90) return 'text-success';
+  if (score >= 75) return 'text-score-good';
+  if (score >= 55) return 'text-warning';
+  if (score >= 35) return 'text-severity-high';
+  return 'text-severity-critical';
+};
+
 export default function AdminPanel() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuthStore();
   const navigate = useNavigate();
   const [users, setUsers] = useState<UserRecord[]>([]);
+  const [audits, setAudits] = useState<AuditRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +86,23 @@ export default function AdminPanel() {
     }
   };
 
+  const fetchAudits = async () => {
+    try {
+      const res = await fetch(`${apiBase}/api/audits?limit=50`, {
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to fetch audits');
+      const data = await res.json();
+      setAudits(data.audits);
+    } catch {
+      // Non-fatal — audit history is supplementary
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated && user?.role === 'admin') {
       fetchUsers();
+      fetchAudits();
     }
   }, [isAuthenticated, user]);
 
@@ -347,6 +383,120 @@ export default function AdminPanel() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Audit History */}
+        <div className="mt-10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-accent/10 rounded-xl flex items-center justify-center">
+              <History size={20} className="text-accent" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-text font-heading">
+                Audit History
+              </h2>
+              <p className="text-sm text-text-muted">
+                All audits across free and premium tiers
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-surface-raised border border-border rounded-xl overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left px-4 py-3 text-xs font-bold text-text-muted uppercase tracking-wider">
+                    URL
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-bold text-text-muted uppercase tracking-wider">
+                    Tier
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-bold text-text-muted uppercase tracking-wider">
+                    Score
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-bold text-text-muted uppercase tracking-wider hidden md:table-cell">
+                    CMS
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-bold text-text-muted uppercase tracking-wider">
+                    Date
+                  </th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody>
+                {audits.map((a) => (
+                  <tr
+                    key={a.id}
+                    className="border-b border-border last:border-b-0 hover:bg-surface-overlay/50 transition-colors"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="text-sm font-medium text-text truncate max-w-[240px]">
+                        {a.url}
+                      </div>
+                      <div className="text-[10px] text-text-muted">
+                        {a.audit_type}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                          a.tier === 'premium'
+                            ? 'bg-accent/10 text-accent'
+                            : 'bg-surface-overlay text-text-muted'
+                        }`}
+                      >
+                        {a.tier}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`text-lg font-extrabold font-heading ${scoreColor(a.overall_score)}`}
+                      >
+                        {a.overall_score}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-text-muted hidden md:table-cell">
+                      {a.detected_cms || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-text-muted">
+                      {a.created_at
+                        ? new Date(a.created_at).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => {
+                          const path =
+                            a.tier === 'premium'
+                              ? `/dashboard/${a.id}`
+                              : `/audit/${a.id}`;
+                          navigate(path);
+                        }}
+                        className="text-xs font-semibold text-accent hover:text-accent-hover flex items-center gap-1 ml-auto transition-colors"
+                      >
+                        View
+                        <ExternalLink size={12} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {audits.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-4 py-8 text-center text-sm text-text-muted"
+                    >
+                      No audits found
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </motion.div>
     </div>
