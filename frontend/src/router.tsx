@@ -5,6 +5,7 @@ import { LandingPage } from './pages/LandingPage';
 import { AuditReportPage } from './pages/AuditReportPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SchedulesPage } from './pages/SchedulesPage';
+import { DashboardErrorBoundary } from './components/DashboardErrorBoundary';
 
 const DashboardLayout = lazy(() => import('./layouts/DashboardLayout'));
 const DashboardOverviewPage = lazy(
@@ -12,6 +13,21 @@ const DashboardOverviewPage = lazy(
 );
 const DashboardGraphPage = lazy(
   () => import('./pages/DashboardGraphPage')
+);
+const DashboardSummaryPage = lazy(
+  () => import('./pages/DashboardSummaryPage')
+);
+const DashboardFixesPage = lazy(
+  () => import('./pages/DashboardFixesPage')
+);
+const DashboardBenchmarkPage = lazy(
+  () => import('./pages/DashboardBenchmarkPage')
+);
+const DashboardClustersPage = lazy(
+  () => import('./pages/DashboardClustersPage')
+);
+const DashboardExportPage = lazy(
+  () => import('./pages/DashboardExportPage')
 );
 const AdminPanel = lazy(
   () => import('./components/auth/AdminPanel')
@@ -59,9 +75,11 @@ export const router = createBrowserRouter([
   {
     path: 'dashboard/:auditId',
     element: (
-      <Suspense fallback={dashboardFallback}>
-        <DashboardLayout />
-      </Suspense>
+      <DashboardErrorBoundary>
+        <Suspense fallback={dashboardFallback}>
+          <DashboardLayout />
+        </Suspense>
+      </DashboardErrorBoundary>
     ),
     children: [
       {
@@ -80,7 +98,46 @@ export const router = createBrowserRouter([
           </Suspense>
         ),
       },
-      // Sprint 6G+: /content, /export
+      {
+        path: 'summary',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardSummaryPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'fixes',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardFixesPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'benchmark',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardBenchmarkPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'clusters',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardClustersPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'export',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardExportPage />
+          </Suspense>
+        ),
+      },
     ],
   },
 ]);
