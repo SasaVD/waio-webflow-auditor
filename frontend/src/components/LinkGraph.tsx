@@ -77,8 +77,8 @@ const CLUSTER_COLORS = [
 ];
 
 const ORPHAN_COLOR = '#EF4444';
-const LINK_COLOR = 'rgba(255,255,255,0.06)';
-const LINK_HIGHLIGHT_COLOR = 'rgba(99,102,241,0.5)';
+const LINK_COLOR = 'rgba(0,0,0,0.08)';
+const LINK_HIGHLIGHT_COLOR = 'rgba(40,32,255,0.5)';
 
 /* ─── Component ─── */
 
@@ -209,7 +209,7 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
       .join('circle')
       .attr('r', d => getNodeRadius(d))
       .attr('fill', d => getNodeColor(d))
-      .attr('stroke', d => d.is_orphan ? ORPHAN_COLOR : 'rgba(255,255,255,0.15)')
+      .attr('stroke', d => d.is_orphan ? ORPHAN_COLOR : 'rgba(0,0,0,0.12)')
       .attr('stroke-width', d => d.is_orphan ? 2 : 0.5)
       .attr('opacity', 0.85)
       .style('cursor', 'pointer');
@@ -320,9 +320,9 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-surface-dark rounded-2xl p-8 text-center"
+        className="bg-surface-raised border border-border rounded-2xl p-8 text-center"
       >
-        <div className="animate-pulse text-text-on-dark-muted text-sm">Loading link graph...</div>
+        <div className="animate-pulse text-text-muted text-sm">Loading link graph...</div>
       </motion.div>
     );
   }
@@ -332,9 +332,9 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-surface-dark rounded-2xl p-6"
+        className="bg-surface-raised border border-border rounded-2xl p-6"
       >
-        <div className="flex items-center gap-2 text-text-on-dark-muted text-sm">
+        <div className="flex items-center gap-2 text-text-muted text-sm">
           <AlertCircle size={16} />
           {error}
         </div>
@@ -355,17 +355,17 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
       className="rounded-2xl overflow-hidden mb-4"
     >
       {/* Header */}
-      <div className="bg-surface-dark px-6 py-4 flex items-center justify-between">
+      <div className="bg-surface-raised border-b border-border px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">
-            <Network size={16} className="text-indigo-400" />
+          <div className="w-8 h-8 rounded-lg bg-accent-muted flex items-center justify-center">
+            <Network size={16} className="text-accent" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-white">Site Link Graph</h3>
-            <p className="text-xs text-gray-400">
+            <h3 className="text-sm font-bold text-text">Site Link Graph</h3>
+            <p className="text-xs text-text-muted">
               {stats.total_pages} pages &middot; {stats.total_internal_links} internal links
               {orphanCount > 0 && (
-                <span className="text-red-400 ml-2">&middot; {orphanCount} orphan pages</span>
+                <span className="text-severity-critical ml-2">&middot; {orphanCount} orphan pages</span>
               )}
             </p>
           </div>
@@ -373,7 +373,7 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowOrphans(!showOrphans)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-gray-300 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-border text-xs text-text-secondary transition-colors"
             title={showOrphans ? 'Hide orphan pages' : 'Show orphan pages'}
           >
             {showOrphans ? <EyeOff size={12} /> : <Eye size={12} />}
@@ -381,7 +381,7 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
           </button>
           <button
             onClick={() => setExpanded(!expanded)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-gray-300 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-border text-xs text-text-secondary transition-colors"
           >
             {expanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
             {expanded ? 'Collapse' : 'Expand'}
@@ -389,36 +389,36 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
         </div>
       </div>
 
-      {/* Graph Canvas */}
+      {/* Graph Canvas — intentionally dark for data visualization contrast */}
       <div
         ref={containerRef}
-        className="relative bg-[#0F0F14]"
+        className="relative bg-[#0F172A]"
         style={{ height: expanded ? 700 : 450 }}
       >
         <svg ref={svgRef} className="w-full h-full" />
 
         {/* Tooltip */}
         {hoveredNode && (
-          <div className="absolute top-4 right-4 bg-gray-900/95 backdrop-blur border border-white/10 rounded-xl p-4 max-w-xs pointer-events-none z-10">
-            <div className="text-xs font-bold text-white truncate mb-2">{hoveredNode.label}</div>
-            <div className="text-[10px] text-gray-400 truncate mb-3">{hoveredNode.id}</div>
+          <div className="absolute top-4 right-4 bg-white/95 backdrop-blur border border-border rounded-xl p-4 max-w-xs pointer-events-none z-10 shadow-card-hover">
+            <div className="text-xs font-bold text-text truncate mb-2">{hoveredNode.label}</div>
+            <div className="text-[10px] text-text-muted truncate mb-3">{hoveredNode.id}</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
-              <span className="text-gray-400">Inbound:</span>
-              <span className="text-white font-medium">{hoveredNode.inbound}</span>
-              <span className="text-gray-400">Outbound:</span>
-              <span className="text-white font-medium">{hoveredNode.outbound}</span>
-              <span className="text-gray-400">Click depth:</span>
-              <span className="text-white font-medium">{hoveredNode.depth ?? 'N/A'}</span>
+              <span className="text-text-muted">Inbound:</span>
+              <span className="text-text font-medium">{hoveredNode.inbound}</span>
+              <span className="text-text-muted">Outbound:</span>
+              <span className="text-text font-medium">{hoveredNode.outbound}</span>
+              <span className="text-text-muted">Click depth:</span>
+              <span className="text-text font-medium">{hoveredNode.depth ?? 'N/A'}</span>
               {hoveredNode.is_orphan && (
                 <>
-                  <span className="text-red-400">Status:</span>
-                  <span className="text-red-400 font-medium">Orphan page</span>
+                  <span className="text-severity-critical">Status:</span>
+                  <span className="text-severity-critical font-medium">Orphan page</span>
                 </>
               )}
               {hoveredNode.nlp_category && (
                 <>
-                  <span className="text-gray-400">Category:</span>
-                  <span className="text-white font-medium truncate">{hoveredNode.nlp_category}</span>
+                  <span className="text-text-muted">Category:</span>
+                  <span className="text-text font-medium truncate">{hoveredNode.nlp_category}</span>
                 </>
               )}
             </div>
@@ -427,8 +427,8 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
 
         {/* Cluster Legend */}
         {graphData.clusters.length > 0 && (
-          <div className="absolute bottom-4 left-4 bg-gray-900/90 backdrop-blur border border-white/10 rounded-xl p-3 max-w-xs max-h-40 overflow-y-auto z-10">
-            <div className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Clusters</div>
+          <div className="absolute bottom-4 left-4 bg-white/95 backdrop-blur border border-border rounded-xl p-3 max-w-xs max-h-40 overflow-y-auto z-10 shadow-card">
+            <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider mb-2">Clusters</div>
             <div className="space-y-1">
               {graphData.clusters.slice(0, 8).map((cluster, i) => (
                 <div key={cluster.prefix} className="flex items-center gap-2 text-[11px]">
@@ -436,15 +436,15 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
                     className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                     style={{ backgroundColor: CLUSTER_COLORS[i % CLUSTER_COLORS.length] }}
                   />
-                  <span className="text-gray-300 truncate">{cluster.prefix}</span>
-                  <span className="text-gray-500 ml-auto">{cluster.page_count}</span>
+                  <span className="text-text-secondary truncate">{cluster.prefix}</span>
+                  <span className="text-text-muted ml-auto">{cluster.page_count}</span>
                 </div>
               ))}
               {orphanCount > 0 && (
                 <div className="flex items-center gap-2 text-[11px]">
                   <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-red-500" style={{ backgroundColor: 'transparent' }} />
-                  <span className="text-red-400">Orphan pages</span>
-                  <span className="text-gray-500 ml-auto">{orphanCount}</span>
+                  <span className="text-severity-critical">Orphan pages</span>
+                  <span className="text-text-muted ml-auto">{orphanCount}</span>
                 </div>
               )}
             </div>
@@ -453,26 +453,26 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
       </div>
 
       {/* Stats Bar */}
-      <div className="bg-[#12121A] px-6 py-3 grid grid-cols-2 md:grid-cols-5 gap-4 text-center border-t border-white/5">
+      <div className="bg-surface-raised px-6 py-3 grid grid-cols-2 md:grid-cols-5 gap-4 text-center border-t border-border">
         <div>
-          <div className="text-lg font-bold text-white">{stats.total_pages}</div>
-          <div className="text-[10px] text-gray-400 uppercase tracking-wider">Pages</div>
+          <div className="text-lg font-bold text-text">{stats.total_pages}</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider">Pages</div>
         </div>
         <div>
-          <div className="text-lg font-bold text-white">{stats.avg_inbound_links}</div>
-          <div className="text-[10px] text-gray-400 uppercase tracking-wider">Avg Links</div>
+          <div className="text-lg font-bold text-text">{stats.avg_inbound_links}</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider">Avg Links</div>
         </div>
         <div>
-          <div className="text-lg font-bold text-white">{stats.max_depth}</div>
-          <div className="text-[10px] text-gray-400 uppercase tracking-wider">Max Depth</div>
+          <div className="text-lg font-bold text-text">{stats.max_depth}</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider">Max Depth</div>
         </div>
         <div>
-          <div className={`text-lg font-bold ${orphanCount > 0 ? 'text-red-400' : 'text-white'}`}>{orphanCount}</div>
-          <div className="text-[10px] text-gray-400 uppercase tracking-wider">Orphans</div>
+          <div className={`text-lg font-bold ${orphanCount > 0 ? 'text-severity-critical' : 'text-text'}`}>{orphanCount}</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider">Orphans</div>
         </div>
         <div>
-          <div className="text-lg font-bold text-white">{graphData.hubs.length}</div>
-          <div className="text-[10px] text-gray-400 uppercase tracking-wider">Hub Pages</div>
+          <div className="text-lg font-bold text-text">{graphData.hubs.length}</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider">Hub Pages</div>
         </div>
       </div>
     </motion.div>

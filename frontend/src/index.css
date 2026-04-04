@@ -2,21 +2,21 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ============================================
- * WAIO Design System — Dark-First Brand DNA
- * Veza Digital · #0D121C / #2820FF / Glow
+ * WAIO Design System — Light-First Brand
+ * Veza Digital · #FFFFFF / #2820FF / Clean
  * ============================================ */
 
 @theme {
   /* --- Brand / Accent (Vivid Indigo) --- */
   --color-accent: #2820FF;
   --color-accent-hover: #3D35FF;
-  --color-accent-muted: #2820FF20;
+  --color-accent-muted: #2820FF15;
 
   /* Legacy aliases — old components use "primary" and "accent-light" */
   --color-primary: #2820FF;
   --color-primary-hover: #3D35FF;
-  --color-primary-light: #2820FF20;
-  --color-accent-light: #47CD8915;
+  --color-primary-light: #2820FF15;
+  --color-accent-light: #F0FDF4;
 
   /* --- Secondary Accents --- */
   --color-secondary-blue: #0194FE;
@@ -29,51 +29,51 @@
   --color-error: #EF4444;
   --color-critical: #DC2626;
 
-  /* --- Surfaces (Dark-First) --- */
-  --color-surface: #0D121C;
-  --color-surface-raised: #151B28;
-  --color-surface-overlay: #1A2235;
+  /* --- Surfaces (Light-First) --- */
+  --color-surface: #FFFFFF;
+  --color-surface-raised: #F8FAFC;
+  --color-surface-overlay: #F1F5F9;
 
   /* Legacy aliases */
-  --color-surface-secondary: #151B28;
-  --color-surface-dark: #0D121C;
-  --color-surface-dark-secondary: #1A2235;
+  --color-surface-secondary: #F8FAFC;
+  --color-surface-dark: #0F172A;
+  --color-surface-dark-secondary: #1E293B;
 
-  /* --- Text (Light-on-Dark) --- */
-  --color-text: #F1F5F9;
-  --color-text-secondary: #94A3B8;
-  --color-text-muted: #64748B;
+  /* --- Text (Dark-on-Light) --- */
+  --color-text: #0F172A;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94A3B8;
 
   /* Legacy aliases */
-  --color-text-primary: #F1F5F9;
+  --color-text-primary: #0F172A;
   --color-text-on-dark: #FFFFFF;
-  --color-text-on-dark-muted: #94A3B8;
+  --color-text-on-dark-muted: #CBD5E1;
 
   /* --- Borders --- */
-  --color-border: #1E293B;
-  --color-border-subtle: #1E293B80;
+  --color-border: #E2E8F0;
+  --color-border-subtle: #E2E8F080;
 
   /* Legacy alias */
-  --color-border-light: #1E293B80;
+  --color-border-light: #E2E8F080;
 
-  /* --- Severity (dark-mode backgrounds are translucent) --- */
+  /* --- Severity (light backgrounds with dark text) --- */
   --color-severity-critical: #DC2626;
-  --color-severity-critical-bg: #DC262615;
+  --color-severity-critical-bg: #FEF2F2;
   --color-severity-high: #EF4444;
-  --color-severity-high-bg: #EF444415;
+  --color-severity-high-bg: #FEF2F2;
   --color-severity-medium: #F59E0B;
-  --color-severity-medium-bg: #F59E0B15;
+  --color-severity-medium-bg: #FFFBEB;
   --color-severity-low: #0194FE;
-  --color-severity-low-bg: #0194FE15;
+  --color-severity-low-bg: #EFF6FF;
   --color-severity-positive: #47CD89;
-  --color-severity-positive-bg: #47CD8915;
+  --color-severity-positive-bg: #F0FDF4;
 
-  /* --- Score Colors (unchanged — high contrast on dark) --- */
-  --color-score-excellent: #22C55E;
-  --color-score-good: #84CC16;
-  --color-score-needs: #EAB308;
-  --color-score-poor: #F97316;
-  --color-score-critical: #EF4444;
+  /* --- Score Colors (high contrast, works on light) --- */
+  --color-score-excellent: #16A34A;
+  --color-score-good: #65A30D;
+  --color-score-needs: #CA8A04;
+  --color-score-poor: #EA580C;
+  --color-score-critical: #DC2626;
 
   /* --- Typography --- */
   --font-heading: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
@@ -89,12 +89,12 @@
   --radius-lg: 16px;
   --radius-xl: 24px;
 
-  /* --- Shadows --- */
-  --shadow-glow-accent: 0 0 20px 0 #2820FF40, 0 0 60px 0 #2820FF20;
-  --shadow-glow-blue: 0 0 20px 0 #0194FE30, 0 0 50px 0 #0194FE15;
-  --shadow-glow-success: 0 0 15px 0 #47CD8930;
-  --shadow-card: 0 1px 3px 0 #0D121C80, 0 4px 16px 0 #0D121C40;
-  --shadow-card-hover: 0 4px 12px 0 #0D121C90, 0 8px 24px 0 #0D121C60;
+  /* --- Shadows (light theme — subtle) --- */
+  --shadow-glow-accent: 0 0 20px 0 #2820FF20, 0 0 40px 0 #2820FF10;
+  --shadow-glow-blue: 0 0 20px 0 #0194FE15, 0 0 40px 0 #0194FE08;
+  --shadow-glow-success: 0 0 15px 0 #47CD8920;
+  --shadow-card: 0 1px 3px 0 rgba(0,0,0,0.06), 0 1px 2px 0 rgba(0,0,0,0.04);
+  --shadow-card-hover: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
 
   /* --- Animations --- */
   --animate-fade-in: fade-in 0.5s ease-out;
@@ -128,26 +128,26 @@ body {
 }
 
 /* ============================================
- * Scrollbar (dark)
+ * Scrollbar (light)
  * ============================================ */
 
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 999px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.2); }
 
 /* ============================================
- * Utility: Glow Effects
+ * Utility: Glow Effects (reduced for light)
  * ============================================ */
 
 .glow-accent {
-  box-shadow: 0 0 20px 0 #2820FF40, 0 0 60px 0 #2820FF20;
+  box-shadow: 0 0 20px 0 #2820FF20, 0 0 40px 0 #2820FF10;
 }
 .glow-blue {
-  box-shadow: 0 0 20px 0 #0194FE30, 0 0 50px 0 #0194FE15;
+  box-shadow: 0 0 20px 0 #0194FE15, 0 0 40px 0 #0194FE08;
 }
 .glow-success {
-  box-shadow: 0 0 15px 0 #47CD8930;
+  box-shadow: 0 0 15px 0 #47CD8920;
 }
 
 /* ============================================
@@ -156,8 +156,8 @@ body {
 
 .bg-grid-pattern {
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(#E2E8F020 1px, transparent 1px),
+    linear-gradient(90deg, #E2E8F020 1px, transparent 1px);
   background-size: 64px 64px;
 }
 

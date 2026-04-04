@@ -21,10 +21,10 @@ interface PillarRadarChartProps {
 export const PillarRadarChart: React.FC<PillarRadarChartProps> = ({ data }) => (
   <ResponsiveContainer width="100%" height={320}>
     <RadarChart cx="50%" cy="50%" outerRadius="70%" data={data}>
-      <PolarGrid stroke="#1E293B" />
+      <PolarGrid stroke="#E2E8F0" />
       <PolarAngleAxis
         dataKey="pillar"
-        tick={{ fill: '#94A3B8', fontSize: 11, fontWeight: 600 }}
+        tick={{ fill: '#475569', fontSize: 11, fontWeight: 600 }}
       />
       <PolarRadiusAxis
         angle={90}
@@ -34,12 +34,13 @@ export const PillarRadarChart: React.FC<PillarRadarChartProps> = ({ data }) => (
       />
       <Tooltip
         contentStyle={{
-          backgroundColor: '#151B28',
-          border: '1px solid #1E293B',
+          backgroundColor: '#FFFFFF',
+          border: '1px solid #E2E8F0',
           borderRadius: '8px',
-          color: '#F1F5F9',
+          color: '#0F172A',
           fontSize: '12px',
           fontWeight: 600,
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07)',
         }}
         formatter={(value) => [`${value}/100`, 'Score']}
       />
@@ -48,7 +49,7 @@ export const PillarRadarChart: React.FC<PillarRadarChartProps> = ({ data }) => (
         dataKey="score"
         stroke="#2820FF"
         fill="#2820FF"
-        fillOpacity={0.2}
+        fillOpacity={0.15}
         strokeWidth={2}
       />
     </RadarChart>

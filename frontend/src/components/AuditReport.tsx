@@ -2,12 +2,13 @@ import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, ExternalLink, FileCode, FileJson, Paintbrush, Zap, Accessibility,
-  AlertTriangle, AlertCircle, XCircle, Info, CheckCircle2,
+  AlertTriangle, AlertCircle, XCircle, Info, CheckCircle2, Table,
   BookOpen, Layers, Radio, ShieldCheck, Download, Mail, FileText, Loader2, X,
   Link2, Wrench, Code2, Crown, Lock,
 } from 'lucide-react';
 import { ExecutiveSummary } from './ExecutiveSummary';
 import { LinkGraph } from './LinkGraph';
+import { generateExcel } from '../utils/generateExcel';
 
 interface ReportProps {
   report: any;
@@ -35,9 +36,9 @@ const scoreColorClass = (label: string): string => {
 };
 
 const severityStyles: Record<string, { bg: string; border: string; text: string; badge: string; icon: any }> = {
-  critical: { bg: 'bg-severity-critical-bg', border: 'border-l-severity-critical', text: 'text-red-300', badge: 'bg-severity-critical', icon: XCircle },
-  high:     { bg: 'bg-severity-high-bg', border: 'border-l-severity-high', text: 'text-red-300', badge: 'bg-severity-high', icon: AlertCircle },
-  medium:   { bg: 'bg-severity-medium-bg', border: 'border-l-severity-medium', text: 'text-yellow-200', badge: 'bg-severity-medium', icon: Info },
+  critical: { bg: 'bg-severity-critical-bg', border: 'border-l-severity-critical', text: 'text-red-800', badge: 'bg-severity-critical', icon: XCircle },
+  high:     { bg: 'bg-severity-high-bg', border: 'border-l-severity-high', text: 'text-red-800', badge: 'bg-severity-high', icon: AlertCircle },
+  medium:   { bg: 'bg-severity-medium-bg', border: 'border-l-severity-medium', text: 'text-amber-800', badge: 'bg-severity-medium', icon: Info },
 };
 
 const pillarMeta: Record<string, { icon: any; label: string }> = {
@@ -182,6 +183,13 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
               >
                 {mdLoading ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
                 Markdown
+              </button>
+              <button
+                onClick={() => generateExcel(report)}
+                className="flex items-center gap-2 bg-surface-overlay hover:bg-surface-raised border border-border text-text font-semibold px-3.5 py-2.5 rounded-xl transition-all text-sm"
+              >
+                <Table size={14} />
+                Excel
               </button>
               <button
                 onClick={() => { setShowEmailModal(!showEmailModal); setEmailResult(null); }}
@@ -386,7 +394,7 @@ const ScoreGauge: React.FC<{ score: number; label: string; size: number }> = ({ 
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="transform -rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="10" />
         <motion.circle
           cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round"
           strokeDasharray={circumference}

@@ -46,15 +46,15 @@ export const SiteAuditReport: React.FC<SiteReportProps> = ({ report, onNewAudit 
       </div>
 
       <div className="max-w-4xl mx-auto px-6 py-8">
-        <div className="bg-surface-dark rounded-2xl p-8 flex flex-col items-center justify-center text-center mb-8">
-          <h3 className="text-sm font-bold uppercase tracking-widest text-text-on-dark-muted mb-2">Aggregate Site Score</h3>
+        <div className="bg-surface-raised border border-border rounded-2xl p-8 flex flex-col items-center justify-center text-center mb-8">
+          <h3 className="text-sm font-bold uppercase tracking-widest text-text-muted mb-2">Aggregate Site Score</h3>
           <div className={`text-[6rem] font-extrabold leading-none ${scoreColorClass(report.overall_label)}`}>
             {report.overall_score}
           </div>
           <div className={`text-sm font-bold uppercase tracking-widest mt-2 ${scoreColorClass(report.overall_label)}`}>
             {report.overall_label}
           </div>
-          <div className="text-sm font-medium text-text-on-dark-muted mt-4 pt-4 border-t border-white/10">
+          <div className="text-sm font-medium text-text-muted mt-4 pt-4 border-t border-border">
             Across {report.pages_crawled} compiled pages
           </div>
         </div>
