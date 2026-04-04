@@ -11,8 +11,8 @@ interface AuditState {
   runAudit: (
     url: string,
     auditType: 'single' | 'site' | 'competitive',
-    competitorUrls: string[],
-    tier: 'free' | 'premium'
+    competitorUrls?: string[],
+    tier?: 'free' | 'premium'
   ) => Promise<void>;
   loadReport: (jobId: string, pageUrl: string) => Promise<void>;
   clearAudit: () => void;
@@ -24,7 +24,7 @@ export const useAuditStore = create<AuditState>((set) => ({
   error: null,
   auditedUrl: '',
 
-  runAudit: async (url, auditType, competitorUrls, tier) => {
+  runAudit: async (url, auditType, competitorUrls = [], tier = 'free') => {
     set({ isLoading: true, error: null, report: null, auditedUrl: url });
 
     let apiUrl = `${apiBase}/api/audit`;

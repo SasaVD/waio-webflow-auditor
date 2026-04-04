@@ -18,34 +18,14 @@ interface PillarRadarChartProps {
   data: PillarScore[];
 }
 
-const CustomTick = ({
-  payload,
-  x,
-  y,
-  textAnchor,
-}: {
-  payload: { value: string };
-  x: number;
-  y: number;
-  textAnchor: string;
-}) => (
-  <text
-    x={x}
-    y={y}
-    textAnchor={textAnchor}
-    fill="#94A3B8"
-    fontSize={11}
-    fontWeight={600}
-  >
-    {payload.value}
-  </text>
-);
-
 export const PillarRadarChart: React.FC<PillarRadarChartProps> = ({ data }) => (
   <ResponsiveContainer width="100%" height={320}>
     <RadarChart cx="50%" cy="50%" outerRadius="70%" data={data}>
       <PolarGrid stroke="#1E293B" />
-      <PolarAngleAxis dataKey="pillar" tick={CustomTick} />
+      <PolarAngleAxis
+        dataKey="pillar"
+        tick={{ fill: '#94A3B8', fontSize: 11, fontWeight: 600 }}
+      />
       <PolarRadiusAxis
         angle={90}
         domain={[0, 100]}
@@ -61,7 +41,7 @@ export const PillarRadarChart: React.FC<PillarRadarChartProps> = ({ data }) => (
           fontSize: '12px',
           fontWeight: 600,
         }}
-        formatter={(value: number) => [`${value}/100`, 'Score']}
+        formatter={(value) => [`${value}/100`, 'Score']}
       />
       <Radar
         name="Score"

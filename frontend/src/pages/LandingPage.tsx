@@ -7,7 +7,7 @@ import { useAuditStore } from '../stores/auditStore';
 export function LandingPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { isLoading, auditedUrl, error, runAudit, loadReport, clearAudit } =
+  const { isLoading, error, runAudit, loadReport, clearAudit } =
     useAuditStore();
 
   // On mount: handle legacy ?job_id=&page_url= params, or clear stale data

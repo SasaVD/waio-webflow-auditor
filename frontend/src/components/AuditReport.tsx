@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, ExternalLink, FileCode, FileJson, Paintbrush, Zap, Accessibility,
-  AlertTriangle, AlertCircle, XCircle, Info, CheckCircle2, ChevronDown, ChevronUp,
+  AlertTriangle, AlertCircle, XCircle, Info, CheckCircle2,
   BookOpen, Layers, Radio, ShieldCheck, Download, Mail, FileText, Loader2, X,
   Link2, Wrench, Code2, Crown, Lock,
 } from 'lucide-react';

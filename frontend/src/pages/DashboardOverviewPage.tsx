@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useParams, Link } from 'react-router';
+import { Link } from 'react-router';
 import { motion } from 'framer-motion';
 import {
   Activity,
@@ -82,7 +82,6 @@ interface Finding {
 }
 
 export default function DashboardOverviewPage() {
-  const { auditId } = useParams();
   const report = useAuditStore((s) => s.report);
 
   // Flatten all findings with pillar key
