@@ -43,7 +43,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({ report }) => {
         .replace(/_$/, '');
       const date = new Date().toISOString().slice(0, 10);
       a.href = blobUrl;
-      a.download = `WAIO-Audit-${domain}-${date}.pdf`;
+      a.download = `WAIO-Intelligence-Report-${domain}-${date}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

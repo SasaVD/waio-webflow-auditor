@@ -42,16 +42,16 @@ const severityStyles: Record<string, { bg: string; border: string; text: string;
 };
 
 const pillarMeta: Record<string, { icon: any; label: string }> = {
-  semantic_html: { icon: FileCode, label: 'Semantic HTML' },
-  structured_data: { icon: FileJson, label: 'Structured Data' },
-  aeo_content: { icon: BookOpen, label: 'AEO Content' },
-  css_quality: { icon: Paintbrush, label: 'CSS Quality' },
-  js_bloat: { icon: Zap, label: 'JS Performance' },
-  accessibility: { icon: Accessibility, label: 'Accessibility' },
-  rag_readiness: { icon: Layers, label: 'RAG Readiness' },
-  agentic_protocols: { icon: Radio, label: 'Agentic Protocols' },
-  data_integrity: { icon: ShieldCheck, label: 'Data Integrity' },
-  internal_linking: { icon: Link2, label: 'Internal Linking' },
+  semantic_html: { icon: FileCode, label: 'Search Engine Clarity' },
+  structured_data: { icon: FileJson, label: 'Rich Search Presence' },
+  aeo_content: { icon: BookOpen, label: 'AI Answer Readiness' },
+  css_quality: { icon: Paintbrush, label: 'Visual Consistency' },
+  js_bloat: { icon: Zap, label: 'Page Speed & Load Time' },
+  accessibility: { icon: Accessibility, label: 'Inclusive Reach' },
+  rag_readiness: { icon: Layers, label: 'AI Retrieval Readiness' },
+  agentic_protocols: { icon: Radio, label: 'AI Agent Compatibility' },
+  data_integrity: { icon: ShieldCheck, label: 'Tracking & Analytics Accuracy' },
+  internal_linking: { icon: Link2, label: 'Content Architecture' },
 };
 
 /* ─── Main Report Component ─── */
@@ -81,7 +81,7 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `WAIO_Audit_${report.url.replace(/https?:\/\//, '').replace(/\//g, '_').replace(/_$/, '')}.pdf`;
+      a.download = `WAIO-Intelligence-Report-${report.url.replace(/https?:\/\//, '').replace(/\//g, '_').replace(/_$/, '')}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -106,7 +106,7 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `WAIO_Audit_${report.url.replace(/https?:\/\//, '').replace(/\//g, '_').replace(/_$/, '')}.md`;
+      a.download = `WAIO-Intelligence-Report-${report.url.replace(/https?:\/\//, '').replace(/\//g, '_').replace(/_$/, '')}.md`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -150,7 +150,7 @@ export const AuditReport: React.FC<ReportProps> = ({ report, onNewAudit, onViewH
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-3 mb-1">
-                <span className="text-xs font-semibold text-text-muted uppercase tracking-widest">Audit Report</span>
+                <span className="text-xs font-semibold text-text-muted uppercase tracking-widest">Intelligence Report</span>
                 <span className="text-xs text-text-muted">
                   {new Date(report.audit_timestamp).toLocaleDateString('en-US', {
                     year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -674,7 +674,7 @@ const DetailedFindings: React.FC<{ categories: any; webflowFixes?: Record<string
                               className="inline-flex items-center gap-1.5 text-[11px] font-bold text-accent hover:text-accent-hover transition-colors"
                             >
                               <Wrench size={12} />
-                              {isFixOpen ? 'Hide' : 'How to Fix in Webflow'}
+                              {isFixOpen ? 'Hide' : 'How to Fix This'}
                               <span className="text-[10px] font-normal text-text-muted ml-1">
                                 {fix.difficulty} &middot; {fix.estimated_time}
                               </span>
@@ -782,14 +782,14 @@ const PremiumPreview: React.FC = () => (
         <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-accent/10 flex items-center justify-center">
           <Crown size={28} className="text-accent" />
         </div>
-        <p className="text-lg font-bold text-text mb-1 font-heading">Unlock Premium Insights</p>
+        <p className="text-lg font-bold text-text mb-1 font-heading">See the full picture</p>
         <p className="text-text-muted text-sm mb-6 max-w-md mx-auto">
-          Executive summary, Webflow fix instructions, link graph visualization, WDF*IDF content gaps, and competitor benchmarking.
+          Get an executive summary, step-by-step fix instructions, full site link map, content gap analysis, and competitor benchmarking.
         </p>
         <div className="flex items-center justify-center gap-3">
           <button className="bg-accent hover:bg-accent-hover text-white px-6 py-2.5 rounded-xl font-semibold transition-all hover:shadow-glow-accent flex items-center gap-2">
             <Lock size={14} />
-            Upgrade to Premium
+            Get the Full Report
           </button>
         </div>
       </div>

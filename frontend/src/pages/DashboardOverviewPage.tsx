@@ -25,6 +25,7 @@ import { useAuditStore } from '../stores/auditStore';
 import { KpiCard } from '../components/dashboard/KpiCard';
 import { PillarRadarChart } from '../components/dashboard/PillarRadarChart';
 import { ExportButton } from '../components/export/ExportButton';
+import { PILLAR_LABELS, PILLAR_SHORT_LABELS } from '../constants/pillarLabels';
 
 /* ─── Helpers ─── */
 const scoreColor = (score: number): string => {
@@ -43,18 +44,29 @@ const scoreLabel = (score: number): string => {
   return 'Critical';
 };
 
-const pillarMeta: Record<string, { icon: React.ElementType; label: string; short: string }> = {
-  semantic_html:    { icon: FileCode, label: 'Semantic HTML', short: 'HTML' },
-  structured_data:  { icon: FileJson, label: 'Structured Data', short: 'Schema' },
-  aeo_content:      { icon: BookOpen, label: 'AEO Content', short: 'AEO' },
-  css_quality:      { icon: Paintbrush, label: 'CSS Quality', short: 'CSS' },
-  js_bloat:         { icon: Zap, label: 'JS Performance', short: 'JS' },
-  accessibility:    { icon: Accessibility, label: 'Accessibility', short: 'A11y' },
-  rag_readiness:    { icon: Layers, label: 'RAG Readiness', short: 'RAG' },
-  agentic_protocols:{ icon: Radio, label: 'Agentic Protocols', short: 'Agent' },
-  data_integrity:   { icon: ShieldCheck, label: 'Data Integrity', short: 'Data' },
-  internal_linking: { icon: Link2, label: 'Internal Linking', short: 'Links' },
+const pillarIcons: Record<string, React.ElementType> = {
+  semantic_html: FileCode,
+  structured_data: FileJson,
+  aeo_content: BookOpen,
+  css_quality: Paintbrush,
+  js_bloat: Zap,
+  accessibility: Accessibility,
+  rag_readiness: Layers,
+  agentic_protocols: Radio,
+  data_integrity: ShieldCheck,
+  internal_linking: Link2,
 };
+
+const pillarMeta: Record<string, { icon: React.ElementType; label: string; short: string }> = Object.fromEntries(
+  Object.keys(PILLAR_LABELS).map((key) => [
+    key,
+    {
+      icon: pillarIcons[key] ?? FileCode,
+      label: PILLAR_LABELS[key],
+      short: PILLAR_SHORT_LABELS[key] ?? key,
+    },
+  ])
+);
 
 const severityIcon: Record<string, React.ElementType> = {
   critical: XCircle,

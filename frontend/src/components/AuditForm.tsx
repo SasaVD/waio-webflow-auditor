@@ -31,16 +31,16 @@ interface AuditFormProps {
 }
 
 const pillars = [
-  { icon: Code2, label: 'Semantic HTML', desc: 'W3C structure validation' },
-  { icon: FileJson, label: 'Structured Data', desc: 'JSON-LD & Microdata' },
-  { icon: BookOpen, label: 'AEO Content', desc: 'AI citation readiness' },
-  { icon: Paintbrush, label: 'CSS Quality', desc: 'Framework & naming audit' },
-  { icon: Shield, label: 'JS Performance', desc: 'Script bloat analysis' },
-  { icon: Accessibility, label: 'Accessibility', desc: 'WCAG 2.1 AA compliance' },
-  { icon: Layers, label: 'RAG Readiness', desc: 'Chunk & context quality' },
-  { icon: Radio, label: 'Agentic Protocols', desc: 'MCP/A2A readiness' },
-  { icon: ShieldCheck, label: 'Data Integrity', desc: 'Conflict detection' },
-  { icon: Link2, label: 'Internal Linking', desc: 'Link depth & equity' },
+  { icon: Code2, label: 'Search Engine Clarity', desc: 'How clearly search engines read your site' },
+  { icon: FileJson, label: 'Rich Search Presence', desc: 'Stand out with rich results in Google' },
+  { icon: BookOpen, label: 'AI Answer Readiness', desc: 'Get cited by ChatGPT & AI assistants' },
+  { icon: Paintbrush, label: 'Visual Consistency', desc: 'Clean, maintainable styling' },
+  { icon: Shield, label: 'Page Speed & Load Time', desc: 'How fast your pages load' },
+  { icon: Accessibility, label: 'Inclusive Reach', desc: 'Accessible to every visitor' },
+  { icon: Layers, label: 'AI Retrieval Readiness', desc: 'Ready for AI-powered search' },
+  { icon: Radio, label: 'AI Agent Compatibility', desc: 'Works with AI agents & tools' },
+  { icon: ShieldCheck, label: 'Tracking & Analytics Accuracy', desc: 'Reliable data you can trust' },
+  { icon: Link2, label: 'Content Architecture', desc: 'How well your pages connect' },
 ];
 
 export const AuditForm: React.FC<AuditFormProps> = ({
@@ -114,21 +114,20 @@ export const AuditForm: React.FC<AuditFormProps> = ({
           <div className="inline-flex items-center gap-2 bg-surface-raised border border-border rounded-full px-4 py-1.5 mb-8">
             <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
             <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-              10-Pillar Deterministic Analysis
+              Free website intelligence report
             </span>
           </div>
 
           <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-text leading-[1.05] mb-6 font-heading">
-            Audit your website
+            See what your website
             <br />
-            <span className="text-accent">foundation</span>
+            is <span className="text-accent">costing you</span>
           </h1>
 
           <p className="text-lg md:text-xl text-text-secondary max-w-2xl mx-auto mb-12 leading-relaxed">
-            Programmatic analysis against W3C, Schema.org, AEO standards, and
-            WCAG 2.1.
-            <br className="hidden md:block" />
-            Zero AI dependency. Evidence-based results only.
+            Get a free, instant analysis across 10 critical performance
+            dimensions — from search visibility and page speed to accessibility
+            and AI readiness.
           </p>
         </motion.div>
 
@@ -149,13 +148,13 @@ export const AuditForm: React.FC<AuditFormProps> = ({
                 value="single"
                 className="flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all data-[state=active]:bg-surface-overlay data-[state=active]:text-text data-[state=active]:shadow-[inset_0_-2px_0_0_var(--color-accent)] text-text-muted hover:text-text-secondary"
               >
-                Single Page
+                Quick Analysis
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="fullsite"
                 className="flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all data-[state=active]:bg-surface-overlay data-[state=active]:text-text data-[state=active]:shadow-[inset_0_-2px_0_0_var(--color-accent)] text-text-muted hover:text-text-secondary flex items-center justify-center gap-2"
               >
-                Full Site
+                Comprehensive Audit
                 <span className="bg-accent text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
                   Pro
                 </span>
@@ -180,7 +179,7 @@ export const AuditForm: React.FC<AuditFormProps> = ({
                     disabled={!url || isLoading}
                     className="bg-accent hover:bg-accent-hover text-white font-semibold px-6 py-3 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap hover:shadow-glow-accent"
                   >
-                    Analyze
+                    Analyze My Website Free
                     <ArrowRight size={16} />
                   </button>
                 </div>
@@ -288,11 +287,16 @@ export const AuditForm: React.FC<AuditFormProps> = ({
                   className="w-full bg-accent hover:bg-accent-hover text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-glow-accent"
                 >
                   <Crown size={16} />
-                  Start Full Audit
+                  Start Comprehensive Audit
                 </button>
               </form>
             </Tabs.Content>
           </Tabs.Root>
+
+          {/* Trust Bar */}
+          <p className="text-xs text-text-muted mt-4 max-w-2xl mx-auto">
+            Analysis validated against W3C · WCAG 2.1 · Schema.org · Google Web Vitals
+          </p>
 
           {/* Error Display */}
           {error && (

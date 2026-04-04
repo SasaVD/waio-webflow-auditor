@@ -5,16 +5,16 @@ import { CheckCircle2, Loader2 } from 'lucide-react';
 const steps = [
   { label: 'Fetching page content', duration: 2500 },
   { label: 'Launching browser engine', duration: 2500 },
-  { label: 'Analyzing semantic HTML structure', duration: 3000 },
-  { label: 'Extracting JSON-LD & Microdata', duration: 2500 },
-  { label: 'Analyzing AEO content structure', duration: 3000 },
-  { label: 'Scanning CSS frameworks & JS bloat', duration: 2500 },
-  { label: 'Running WCAG accessibility checks', duration: 3500 },
-  { label: 'Checking RAG & chunking readiness', duration: 2500 },
-  { label: 'Verifying agentic protocols (llms.txt, robots.txt)', duration: 2500 },
-  { label: 'Detecting data conflicts & integrity issues', duration: 2500 },
-  { label: 'Analyzing internal linking structure', duration: 3000 },
-  { label: 'Compiling audit report', duration: 2000 },
+  { label: 'Checking search engine clarity', duration: 3000 },
+  { label: 'Evaluating rich search presence', duration: 2500 },
+  { label: 'Testing AI answer readiness', duration: 3000 },
+  { label: 'Reviewing visual consistency & page speed', duration: 2500 },
+  { label: 'Running inclusive reach checks', duration: 3500 },
+  { label: 'Assessing AI retrieval readiness', duration: 2500 },
+  { label: 'Checking AI agent compatibility', duration: 2500 },
+  { label: 'Validating tracking & analytics accuracy', duration: 2500 },
+  { label: 'Analyzing content architecture', duration: 3000 },
+  { label: 'Compiling your intelligence report', duration: 2000 },
 ];
 
 interface LoadingStateProps {

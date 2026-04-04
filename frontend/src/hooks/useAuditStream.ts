@@ -11,16 +11,16 @@ interface AuditStreamState {
 
 const STAGES = [
   { key: 'fetch', label: 'Fetching page content' },
-  { key: 'html', label: 'Analyzing HTML structure' },
-  { key: 'structured_data', label: 'Checking structured data' },
-  { key: 'aeo', label: 'Evaluating AEO content' },
-  { key: 'css_js', label: 'Auditing CSS & JavaScript' },
-  { key: 'accessibility', label: 'Running accessibility checks' },
-  { key: 'rag', label: 'Assessing RAG readiness' },
-  { key: 'agentic', label: 'Checking agentic protocols' },
-  { key: 'data_integrity', label: 'Validating data integrity' },
-  { key: 'internal_links', label: 'Analyzing internal links' },
-  { key: 'report', label: 'Generating report' },
+  { key: 'html', label: 'Checking search engine clarity' },
+  { key: 'structured_data', label: 'Evaluating rich search presence' },
+  { key: 'aeo', label: 'Testing AI answer readiness' },
+  { key: 'css_js', label: 'Reviewing visual consistency & speed' },
+  { key: 'accessibility', label: 'Running inclusive reach checks' },
+  { key: 'rag', label: 'Assessing AI retrieval readiness' },
+  { key: 'agentic', label: 'Checking AI agent compatibility' },
+  { key: 'data_integrity', label: 'Validating tracking accuracy' },
+  { key: 'internal_links', label: 'Analyzing content architecture' },
+  { key: 'report', label: 'Compiling your intelligence report' },
 ];
 
 /**

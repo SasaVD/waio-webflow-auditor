@@ -27,6 +27,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
+import { PILLAR_LABELS } from '../constants/pillarLabels';
 
 interface NavItem {
   icon: React.ElementType;
@@ -43,24 +44,24 @@ const navGroups: NavGroup[] = [
   {
     label: 'Technical Health',
     items: [
-      { icon: FileCode, label: 'Semantic HTML', href: '#semantic_html' },
-      { icon: Paintbrush, label: 'CSS Quality', href: '#css_quality' },
-      { icon: Zap, label: 'JS Performance', href: '#js_bloat' },
-      { icon: ShieldCheck, label: 'Data Integrity', href: '#data_integrity' },
+      { icon: FileCode, label: PILLAR_LABELS.semantic_html, href: '#semantic_html' },
+      { icon: Paintbrush, label: PILLAR_LABELS.css_quality, href: '#css_quality' },
+      { icon: Zap, label: PILLAR_LABELS.js_bloat, href: '#js_bloat' },
+      { icon: ShieldCheck, label: PILLAR_LABELS.data_integrity, href: '#data_integrity' },
     ],
   },
   {
     label: 'Content & SEO',
     items: [
-      { icon: BookOpen, label: 'AEO Content', href: '#aeo_content' },
-      { icon: FileJson, label: 'Structured Data', href: '#structured_data' },
-      { icon: Layers, label: 'RAG Readiness', href: '#rag_readiness' },
+      { icon: BookOpen, label: PILLAR_LABELS.aeo_content, href: '#aeo_content' },
+      { icon: FileJson, label: PILLAR_LABELS.structured_data, href: '#structured_data' },
+      { icon: Layers, label: PILLAR_LABELS.rag_readiness, href: '#rag_readiness' },
     ],
   },
   {
     label: 'Links & Architecture',
     items: [
-      { icon: Link2, label: 'Internal Linking', href: '#internal_linking' },
+      { icon: Link2, label: PILLAR_LABELS.internal_linking, href: '#internal_linking' },
       { icon: Network, label: 'Link Graph', href: 'graph' },
       { icon: FolderTree, label: 'Topic Clusters', href: 'clusters' },
     ],
@@ -68,15 +69,15 @@ const navGroups: NavGroup[] = [
   {
     label: 'Accessibility & Protocols',
     items: [
-      { icon: Accessibility, label: 'Accessibility', href: '#accessibility' },
-      { icon: Radio, label: 'Agentic Protocols', href: '#agentic_protocols' },
+      { icon: Accessibility, label: PILLAR_LABELS.accessibility, href: '#accessibility' },
+      { icon: Radio, label: PILLAR_LABELS.agentic_protocols, href: '#agentic_protocols' },
     ],
   },
   {
     label: 'Reports & Export',
     items: [
       { icon: FileText, label: 'Executive Summary', href: 'summary' },
-      { icon: Wrench, label: 'Webflow Fix Guide', href: 'fixes' },
+      { icon: Wrench, label: 'Fix Guide', href: 'fixes' },
       { icon: BarChart3, label: 'Competitor Benchmark', href: 'benchmark' },
       { icon: Download, label: 'Export', href: 'export' },
     ],

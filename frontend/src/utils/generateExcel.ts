@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { PILLAR_LABELS } from '../constants/pillarLabels';
 
 interface Finding {
   severity: string;
@@ -15,19 +16,6 @@ interface PillarScore {
   scoreLabel: string;
 }
 
-const pillarLabels: Record<string, string> = {
-  semantic_html: 'Semantic HTML',
-  structured_data: 'Structured Data',
-  aeo_content: 'AEO Content',
-  css_quality: 'CSS Quality',
-  js_bloat: 'JS Performance',
-  accessibility: 'Accessibility',
-  rag_readiness: 'RAG Readiness',
-  agentic_protocols: 'Agentic Protocols',
-  data_integrity: 'Data Integrity',
-  internal_linking: 'Internal Linking',
-};
-
 function extractFindings(report: Record<string, any>): Finding[] {
   const findings: Finding[] = [];
   if (!report.categories) return findings;
@@ -38,7 +26,7 @@ function extractFindings(report: Record<string, any>): Finding[] {
       const checkObj = check as Record<string, any>;
       if (checkObj.findings) {
         for (const f of checkObj.findings) {
-          findings.push({ ...f, pillar: pillarLabels[pillarKey] || pillarKey });
+          findings.push({ ...f, pillar: PILLAR_LABELS[pillarKey] || pillarKey });
         }
       }
     }
@@ -56,7 +44,7 @@ function extractPillarScores(report: Record<string, any>): PillarScore[] {
     const catObj = cat as Record<string, any>;
     return {
       key,
-      label: pillarLabels[key] || key,
+      label: PILLAR_LABELS[key] || key,
       score: catObj.score ?? 0,
       scoreLabel: catObj.label ?? '',
     };
@@ -68,7 +56,7 @@ export function generateExcel(report: Record<string, any>): void {
 
   // Sheet 1: Summary
   const summaryData = [
-    ['WAIO Audit Report'],
+    ['WAIO Intelligence Report'],
     [''],
     ['URL', report.url],
     ['Audit Date', report.audit_timestamp],
@@ -130,5 +118,5 @@ export function generateExcel(report: Record<string, any>): void {
     .replace(/\//g, '_')
     .replace(/_$/, '');
   const date = new Date().toISOString().slice(0, 10);
-  XLSX.writeFile(wb, `WAIO-Audit-${domain}-${date}.xlsx`);
+  XLSX.writeFile(wb, `WAIO-Intelligence-Report-${domain}-${date}.xlsx`);
 }
