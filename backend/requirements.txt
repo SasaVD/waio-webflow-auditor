@@ -20,3 +20,4 @@ trafilatura
 scikit-learn
 bcrypt
 python-jose[cryptography]
+# force rebuild
