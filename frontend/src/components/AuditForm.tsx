@@ -18,6 +18,7 @@ import {
   X,
   Sparkles,
 } from 'lucide-react';
+import { useAuthStore } from '../stores/authStore';
 
 interface AuditFormProps {
   onRunAudit: (
@@ -48,10 +49,19 @@ export const AuditForm: React.FC<AuditFormProps> = ({
   isLoading,
   error,
 }) => {
+  const { isAuthenticated, openLoginModal } = useAuthStore();
   const [url, setUrl] = useState('');
   const [activeTab, setActiveTab] = useState('single');
   const [competitors, setCompetitors] = useState<string[]>(['']);
   const [scope, setScope] = useState<'domain' | 'subdomain' | 'subfolder'>('domain');
+
+  const handleTabChange = (value: string) => {
+    if (value === 'fullsite' && !isAuthenticated) {
+      openLoginModal();
+      return;
+    }
+    setActiveTab(value);
+  };
 
   const normalizeUrl = (raw: string): string => {
     const trimmed = raw.trim();
@@ -139,7 +149,7 @@ export const AuditForm: React.FC<AuditFormProps> = ({
         >
           <Tabs.Root
             value={activeTab}
-            onValueChange={setActiveTab}
+            onValueChange={handleTabChange}
             className="max-w-2xl mx-auto"
           >
             {/* Tab List */}

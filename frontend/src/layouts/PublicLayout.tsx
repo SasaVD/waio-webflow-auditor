@@ -1,4 +1,5 @@
 import { Outlet, Link } from 'react-router';
+import { UserMenu } from '../components/auth/UserMenu';
 
 export function PublicLayout() {
   return (
@@ -26,6 +27,7 @@ export function PublicLayout() {
             <span className="hidden sm:inline text-xs font-medium text-text-muted uppercase tracking-widest">
               by Veza Digital
             </span>
+            <UserMenu />
           </div>
         </div>
       </nav>

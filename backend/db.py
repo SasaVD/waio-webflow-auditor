@@ -272,3 +272,36 @@ async def save_migration_assessment(audit_id, assessment_json):
 
 async def get_migration_assessment(audit_id_str):
     return None
+
+
+# --- User Authentication stubs (requires PostgreSQL for production) ---
+
+async def get_user_by_email(email):
+    return None
+
+async def get_user_by_id(user_id):
+    return None
+
+async def get_user_by_google_id(google_id):
+    return None
+
+async def create_user(email, password_hash=None, name=None, role="user", auth_provider="email", google_id=None, avatar_url=None):
+    return "stub-user-id"
+
+async def update_user_last_login(user_id):
+    pass
+
+async def update_user_password(user_id, password_hash):
+    pass
+
+async def update_user_google_info(user_id, google_id, avatar_url=None, name=None):
+    pass
+
+async def update_user_active(user_id, is_active):
+    pass
+
+async def list_users():
+    return []
+
+async def has_any_admin():
+    return False

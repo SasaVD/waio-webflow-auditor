@@ -13,6 +13,9 @@ const DashboardOverviewPage = lazy(
 const DashboardGraphPage = lazy(
   () => import('./pages/DashboardGraphPage')
 );
+const AdminPanel = lazy(
+  () => import('./components/auth/AdminPanel')
+);
 
 const dashboardFallback = (
   <div className="min-h-screen bg-surface flex items-center justify-center">
@@ -43,6 +46,14 @@ export const router = createBrowserRouter([
       { path: 'audit/:auditId', element: <AuditReportPage /> },
       { path: 'history', element: <HistoryPage /> },
       { path: 'schedules', element: <SchedulesPage /> },
+      {
+        path: 'admin',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <AdminPanel />
+          </Suspense>
+        ),
+      },
     ],
   },
   {

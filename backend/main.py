@@ -2,7 +2,7 @@ import logging
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Body, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, Response
@@ -39,7 +39,10 @@ from db_router import (init_db, close_db, create_job, get_job_status, get_single
                        save_page_content_batch, save_cms_detection,
                        save_industry_detection,
                        get_page_content_for_audit,
-                       save_migration_assessment, get_migration_assessment)
+                       save_migration_assessment, get_migration_assessment,
+                       get_user_by_email, has_any_admin, create_user)
+from auth import get_current_user, hash_password
+from auth_routes import router as auth_router
 from site_crawler import run_site_crawl
 from scheduler import scheduler_loop
 from competitive_auditor import run_competitive_audit
@@ -75,6 +78,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register auth routes
+app.include_router(auth_router)
 
 class AuditRequest(BaseModel):
     url: HttpUrl
@@ -120,6 +126,24 @@ class CompetitiveRequest(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     await init_db()
+    # Seed admin account from env vars if no admin exists
+    try:
+        admin_exists = await has_any_admin()
+        if not admin_exists:
+            admin_email = os.environ.get("ADMIN_EMAIL")
+            admin_password = os.environ.get("ADMIN_PASSWORD")
+            if admin_email and admin_password:
+                existing = await get_user_by_email(admin_email.lower())
+                if not existing:
+                    await create_user(
+                        email=admin_email.lower(),
+                        password_hash=hash_password(admin_password),
+                        name="Admin",
+                        role="admin",
+                    )
+                    logger.info(f"Admin account seeded: {admin_email}")
+    except Exception as e:
+        logger.warning(f"Admin seeding failed (non-fatal): {e}")
     asyncio.create_task(scheduler_loop())
 
 @app.on_event("shutdown")
@@ -213,10 +237,9 @@ async def perform_competitive_audit(request: CompetitiveRequest):
         raise HTTPException(status_code=500, detail=f"Competitive audit failed: {str(e)}")
 
 @app.post("/api/audit/premium")
-async def perform_premium_audit(request: PremiumAuditRequest):
-    """Premium audit endpoint — runs the full 10-pillar audit plus premium modules.
-    Premium modules (executive summary, fix KB, link graph, WDF*IDF) will be
-    activated as they are built in Sprints 2-4."""
+async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_current_user)):
+    """Premium audit endpoint — requires authentication.
+    Runs the full 10-pillar audit plus premium modules."""
     url = str(request.url)
     audit_id = uuid.uuid4()
     logger.info(f"Starting premium audit for {url} (audit_id={audit_id})")

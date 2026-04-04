@@ -43,6 +43,17 @@ if os.environ.get("DATABASE_URL"):
         get_page_content_for_audit,
         save_migration_assessment,
         get_migration_assessment,
+        # Auth
+        get_user_by_email,
+        get_user_by_id,
+        get_user_by_google_id,
+        create_user,
+        update_user_last_login,
+        update_user_password,
+        update_user_google_info,
+        update_user_active,
+        list_users,
+        has_any_admin,
     )
 else:
     from db import (  # noqa: F401 type: ignore[assignment]
@@ -82,6 +93,17 @@ else:
         get_page_content_for_audit,
         save_migration_assessment,
         get_migration_assessment,
+        # Auth
+        get_user_by_email,
+        get_user_by_id,
+        get_user_by_google_id,
+        create_user,
+        update_user_last_login,
+        update_user_password,
+        update_user_google_info,
+        update_user_active,
+        list_users,
+        has_any_admin,
     )
 
     async def close_db():  # noqa: F811

@@ -824,3 +824,170 @@ async def get_migration_assessment(
         return None
     ma = row["migration_assessment"]
     return json.loads(ma) if isinstance(ma, str) else ma
+
+
+# --- User Authentication (Sprint Auth) ---
+
+
+async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, email, password_hash, name, role, auth_provider, google_id, avatar_url, is_active, created_at, last_login FROM users WHERE email = $1",
+            email,
+        )
+    if not row:
+        return None
+    return {
+        "id": str(row["id"]),
+        "email": row["email"],
+        "password_hash": row["password_hash"],
+        "name": row["name"],
+        "role": row["role"],
+        "auth_provider": row["auth_provider"],
+        "google_id": row["google_id"],
+        "avatar_url": row["avatar_url"],
+        "is_active": row["is_active"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "last_login": row["last_login"].isoformat() if row["last_login"] else None,
+    }
+
+
+async def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, email, password_hash, name, role, auth_provider, google_id, avatar_url, is_active, created_at, last_login FROM users WHERE id = $1",
+            uuid.UUID(user_id),
+        )
+    if not row:
+        return None
+    return {
+        "id": str(row["id"]),
+        "email": row["email"],
+        "password_hash": row["password_hash"],
+        "name": row["name"],
+        "role": row["role"],
+        "auth_provider": row["auth_provider"],
+        "google_id": row["google_id"],
+        "avatar_url": row["avatar_url"],
+        "is_active": row["is_active"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "last_login": row["last_login"].isoformat() if row["last_login"] else None,
+    }
+
+
+async def get_user_by_google_id(google_id: str) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, email, password_hash, name, role, auth_provider, google_id, avatar_url, is_active, created_at, last_login FROM users WHERE google_id = $1",
+            google_id,
+        )
+    if not row:
+        return None
+    return {
+        "id": str(row["id"]),
+        "email": row["email"],
+        "password_hash": row["password_hash"],
+        "name": row["name"],
+        "role": row["role"],
+        "auth_provider": row["auth_provider"],
+        "google_id": row["google_id"],
+        "avatar_url": row["avatar_url"],
+        "is_active": row["is_active"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "last_login": row["last_login"].isoformat() if row["last_login"] else None,
+    }
+
+
+async def create_user(
+    email: str,
+    password_hash: str | None = None,
+    name: str | None = None,
+    role: str = "user",
+    auth_provider: str = "email",
+    google_id: str | None = None,
+    avatar_url: str | None = None,
+) -> str:
+    pool = await get_pool()
+    uid = uuid.uuid4()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO users (id, email, password_hash, name, role, auth_provider, google_id, avatar_url)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+            uid, email, password_hash, name, role, auth_provider, google_id, avatar_url,
+        )
+    return str(uid)
+
+
+async def update_user_last_login(user_id: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET last_login = $1 WHERE id = $2",
+            datetime.now(timezone.utc), uuid.UUID(user_id),
+        )
+
+
+async def update_user_password(user_id: str, password_hash: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET password_hash = $1 WHERE id = $2",
+            password_hash, uuid.UUID(user_id),
+        )
+
+
+async def update_user_google_info(
+    user_id: str,
+    google_id: str,
+    avatar_url: str | None = None,
+    name: str | None = None,
+):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE users SET google_id = $1, avatar_url = COALESCE($2, avatar_url),
+               name = COALESCE($3, name), auth_provider = 'google'
+               WHERE id = $4""",
+            google_id, avatar_url, name, uuid.UUID(user_id),
+        )
+
+
+async def update_user_active(user_id: str, is_active: bool):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET is_active = $1 WHERE id = $2",
+            is_active, uuid.UUID(user_id),
+        )
+
+
+async def list_users() -> List[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, email, name, role, auth_provider, avatar_url, is_active, created_at, last_login FROM users ORDER BY created_at"
+        )
+    return [
+        {
+            "id": str(row["id"]),
+            "email": row["email"],
+            "name": row["name"],
+            "role": row["role"],
+            "auth_provider": row["auth_provider"],
+            "avatar_url": row["avatar_url"],
+            "is_active": row["is_active"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "last_login": row["last_login"].isoformat() if row["last_login"] else None,
+        }
+        for row in rows
+    ]
+
+
+async def has_any_admin() -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1")
+    return row is not None
