@@ -2,13 +2,26 @@
 Authentication core — password hashing, JWT tokens, FastAPI dependencies.
 """
 import os
-import uuid
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 
-import bcrypt
-from jose import jwt, JWTError, ExpiredSignatureError
+try:
+    import bcrypt
+    HAS_BCRYPT = True
+except ImportError:
+    import hashlib
+    import secrets
+    HAS_BCRYPT = False
+    logging.warning("bcrypt not available, using hashlib fallback (less secure)")
+
+try:
+    from jose import jwt, JWTError, ExpiredSignatureError
+    HAS_JOSE = True
+except ImportError:
+    HAS_JOSE = False
+    logging.error("python-jose not available — JWT auth will not work")
+
 from fastapi import Request, HTTPException, Depends
 
 logger = logging.getLogger(__name__)
@@ -22,16 +35,43 @@ COOKIE_NAME = "waio_token"
 # --------------- Password hashing ---------------
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+    if HAS_BCRYPT:
+        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+        logger.info(f"Password hashed with bcrypt, length={len(hashed)}, prefix={hashed[:4]}")
+        return hashed
+    # Fallback: hashlib with random salt
+    salt = secrets.token_hex(16)
+    h = hashlib.sha256((salt + password).encode()).hexdigest()
+    result = f"$sha256${salt}${h}"
+    logger.warning(f"Password hashed with hashlib fallback, length={len(result)}")
+    return result
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
+    if hashed.startswith("$2b$") or hashed.startswith("$2a$"):
+        # bcrypt hash
+        if not HAS_BCRYPT:
+            logger.error("Hash is bcrypt but bcrypt library not available")
+            return False
+        return bcrypt.checkpw(password.encode(), hashed.encode())
+    elif hashed.startswith("$sha256$"):
+        # hashlib fallback hash
+        parts = hashed.split("$")
+        if len(parts) != 4:
+            return False
+        salt = parts[2]
+        expected = parts[3]
+        return hashlib.sha256((salt + password).encode()).hexdigest() == expected
+    else:
+        logger.error(f"Unknown hash format, prefix: {hashed[:10] if hashed else 'empty'}")
+        return False
 
 
 # --------------- JWT tokens ---------------
 
 def create_access_token(user_id: str, email: str, role: str) -> str:
+    if not HAS_JOSE:
+        raise RuntimeError("python-jose not installed — cannot create JWT")
     payload = {
         "sub": user_id,
         "email": email,
@@ -44,6 +84,8 @@ def create_access_token(user_id: str, email: str, role: str) -> str:
 
 def decode_token(token: str) -> Dict[str, Any]:
     """Decode and validate a JWT. Raises on invalid/expired."""
+    if not HAS_JOSE:
+        raise RuntimeError("python-jose not installed — cannot decode JWT")
     return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
 
 

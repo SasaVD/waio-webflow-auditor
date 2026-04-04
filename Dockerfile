@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install Python dependencies
 COPY backend/requirements.txt .
+ARG CACHEBUST=1
 RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "import nltk; nltk.download('punkt_tab')"
 

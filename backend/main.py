@@ -135,9 +135,11 @@ async def startup_event():
             if admin_email and admin_password:
                 existing = await get_user_by_email(admin_email.lower())
                 if not existing:
+                    hashed = hash_password(admin_password)
+                    logger.info(f"Admin password hash: length={len(hashed)}, prefix={hashed[:7]}")
                     await create_user(
                         email=admin_email.lower(),
-                        password_hash=hash_password(admin_password),
+                        password_hash=hashed,
                         name="Admin",
                         role="admin",
                     )

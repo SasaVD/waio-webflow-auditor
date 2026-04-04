@@ -15,6 +15,7 @@ from auth import (
     get_current_user, require_admin,
     check_rate_limit, record_login_attempt,
     COOKIE_NAME, JWT_EXPIRY_DAYS,
+    HAS_BCRYPT, HAS_JOSE,
 )
 from db_router import (
     get_user_by_email, get_user_by_google_id, create_user,
@@ -73,15 +74,23 @@ def _clear_auth_cookie(response: Response):
 async def login(body: LoginRequest, request: Request, response: Response):
     """Email + password login. Returns user object and sets httpOnly JWT cookie."""
     client_ip = request.client.host if request.client else "unknown"
+    email = body.email.strip().lower()
+    logger.info(f"Login attempt for email: {email}")
 
     if not check_rate_limit(client_ip):
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again in a minute.")
 
     record_login_attempt(client_ip)
 
-    user = await get_user_by_email(body.email.strip().lower())
+    user = await get_user_by_email(email)
+    logger.info(f"User found: {user is not None}")
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    logger.info(f"User has password_hash: {user.get('password_hash') is not None}")
+    logger.info(f"Password hash length: {len(user.get('password_hash', ''))}")
+    logger.info(f"Password hash prefix: {(user.get('password_hash') or '')[:7]}")
+    logger.info(f"bcrypt available: {HAS_BCRYPT}, jose available: {HAS_JOSE}")
 
     if not user.get("password_hash"):
         raise HTTPException(status_code=401, detail="This account uses Google sign-in. Please use the Google button.")
@@ -90,8 +99,10 @@ async def login(body: LoginRequest, request: Request, response: Response):
         raise HTTPException(status_code=403, detail="Account deactivated")
 
     if not verify_password(body.password, user["password_hash"]):
+        logger.warning(f"Password verification failed for {email}")
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    logger.info(f"Login successful for {email}")
     token = create_access_token(user["id"], user["email"], user["role"])
     _set_auth_cookie(response, token)
     await update_user_last_login(user["id"])
@@ -243,3 +254,26 @@ async def admin_toggle_user(user_id: str, active: bool = True, admin=Depends(req
         raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
     await update_user_active(user_id, active)
     return {"id": user_id, "is_active": active}
+
+
+# --------------- Diagnostic endpoint (temporary) ---------------
+
+@router.get("/debug")
+async def auth_debug():
+    """Temporary diagnostic endpoint for production debugging."""
+    admin_email = os.environ.get("ADMIN_EMAIL", "")
+    users = await list_users()
+    admin_user = next((u for u in users if u["email"] == admin_email.lower()), None)
+
+    return {
+        "bcrypt_available": HAS_BCRYPT,
+        "jose_available": HAS_JOSE,
+        "total_users": len(users),
+        "admin_email": admin_email,
+        "admin_found_in_db": admin_user is not None,
+        "admin_has_password_hash": bool(admin_user.get("password_hash")) if admin_user else None,
+        "admin_hash_length": len(admin_user.get("password_hash", "")) if admin_user else None,
+        "admin_hash_prefix": (admin_user.get("password_hash") or "")[:7] if admin_user else None,
+        "admin_is_active": admin_user.get("is_active") if admin_user else None,
+        "jwt_secret_set": os.environ.get("JWT_SECRET", "") != "dev-secret-change-in-production",
+    }
