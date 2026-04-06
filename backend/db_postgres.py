@@ -186,6 +186,28 @@ async def save_audit_history(
     return audit_id
 
 
+async def update_audit_report(audit_id, report_updates: dict):
+    """Merge new data into a saved audit's report_json (e.g. after DataForSEO crawl completes).
+    Only updates the specified keys; existing keys are preserved."""
+    pool = await get_pool()
+    if not isinstance(audit_id, uuid.UUID):
+        audit_id = uuid.UUID(str(audit_id))
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT report_json FROM audits WHERE id = $1", audit_id
+        )
+        if not row:
+            return
+        existing = row["report_json"]
+        if isinstance(existing, str):
+            existing = json.loads(existing)
+        existing.update(report_updates)
+        await conn.execute(
+            "UPDATE audits SET report_json = $1 WHERE id = $2",
+            json.dumps(existing), audit_id,
+        )
+
+
 async def _save_normalized_data(conn, audit_id: uuid.UUID, report: dict):
     """Decompose report JSON into pillar_scores and findings tables."""
     categories = report.get("categories", {})

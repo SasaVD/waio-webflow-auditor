@@ -18,7 +18,7 @@ def generate_report(url: str, html_res: dict, sd_res: dict, aeo_res: dict, css_j
     high = sum(1 for f in all_findings if f['severity'] == 'high')
     med = sum(1 for f in all_findings if f['severity'] == 'medium')
     
-    all_positive = (
+    raw_positive = (
         html_res.get("positive_findings", []) +
         sd_res.get("positive_findings", []) +
         aeo_res.get("positive_findings", []) +
@@ -29,6 +29,15 @@ def generate_report(url: str, html_res: dict, sd_res: dict, aeo_res: dict, css_j
         data_res.get("positive_findings", []) +
         (il_res.get("positive_findings", []) if il_res else [])
     )
+    # Normalize: some auditors return strings, others return dicts with "text" key
+    all_positive = []
+    for p in raw_positive:
+        if isinstance(p, str):
+            all_positive.append(p)
+        elif isinstance(p, dict):
+            all_positive.append(p.get("text") or p.get("message") or p.get("description") or str(p))
+        else:
+            all_positive.append(str(p))
     
     top_priorities = []
     # Sort findings: critical first, high second

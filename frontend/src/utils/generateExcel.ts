@@ -51,11 +51,21 @@ function extractPillarScores(report: Record<string, any>): PillarScore[] {
   });
 }
 
+/** Safely convert a positive finding to a string (handles string | object). */
+function positiveText(p: unknown): string {
+  if (typeof p === 'string') return p;
+  if (p && typeof p === 'object') {
+    const obj = p as Record<string, unknown>;
+    return String(obj.text || obj.message || obj.description || JSON.stringify(p));
+  }
+  return String(p);
+}
+
 export function generateExcel(report: Record<string, any>): void {
   const wb = XLSX.utils.book_new();
 
   // Sheet 1: Summary
-  const summaryData = [
+  const summaryRows: any[][] = [
     ['WAIO Intelligence Report'],
     [''],
     ['URL', report.url],
@@ -63,18 +73,37 @@ export function generateExcel(report: Record<string, any>): void {
     ['Overall Score', report.overall_score],
     ['Overall Label', report.overall_label],
     ['Tier', report.tier || 'free'],
+  ];
+  if (report.cms_detection?.platform && report.cms_detection.platform !== 'unknown') {
+    summaryRows.push(['CMS Detected', report.cms_detection.platform]);
+  }
+  summaryRows.push(
     [''],
     ['Summary'],
     ['Total Findings', report.summary?.total_findings ?? 0],
     ['Critical', report.summary?.critical ?? 0],
     ['High', report.summary?.high ?? 0],
     ['Medium', report.summary?.medium ?? 0],
+  );
+  if (report.crawl_stats) {
+    const cs = report.crawl_stats;
+    summaryRows.push(
+      [''],
+      ['Crawl Statistics'],
+      ['Pages Crawled', cs.pages_crawled ?? 0],
+      ['Pages Discovered', cs.pages_discovered ?? 0],
+      ['Internal Links', cs.internal_links ?? 0],
+      ['External Links', cs.external_links ?? 0],
+      ['Broken Links', cs.broken_links ?? 0],
+    );
+  }
+  summaryRows.push(
     [''],
     ['Pillar Scores'],
     ['Pillar', 'Score', 'Label'],
     ...extractPillarScores(report).map((p) => [p.label, p.score, p.scoreLabel]),
-  ];
-  const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+  );
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
   summarySheet['!cols'] = [{ wch: 25 }, { wch: 50 }, { wch: 20 }];
   XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
 
@@ -105,11 +134,53 @@ export function generateExcel(report: Record<string, any>): void {
   if (positives.length > 0) {
     const posData = [
       ['Positive Findings'],
-      ...positives.map((p: string) => [p]),
+      ...positives.map((p: unknown) => [positiveText(p)]),
     ];
     const posSheet = XLSX.utils.aoa_to_sheet(posData);
     posSheet['!cols'] = [{ wch: 80 }];
     XLSX.utils.book_append_sheet(wb, posSheet, 'Positive Findings');
+  }
+
+  // Sheet 4: Webflow Fix Instructions (premium)
+  if (report.webflow_fixes && Object.keys(report.webflow_fixes).length > 0) {
+    const fixData: any[][] = [
+      ['Finding', 'Title', 'Difficulty', 'Time', 'Pillar'],
+    ];
+    for (const [pattern, fix] of Object.entries(report.webflow_fixes)) {
+      const f = fix as Record<string, any>;
+      fixData.push([pattern, f.title || '', f.difficulty || '', f.estimated_time || '', f.pillar_key || '']);
+    }
+    const fixSheet = XLSX.utils.aoa_to_sheet(fixData);
+    fixSheet['!cols'] = [{ wch: 25 }, { wch: 40 }, { wch: 12 }, { wch: 15 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, fixSheet, 'Fix Instructions');
+  }
+
+  // Sheet 5: Competitor Data (premium)
+  if (report.competitive_data?.rankings?.length) {
+    const compData: any[][] = [['Rank', 'URL', 'Score', 'Label']];
+    report.competitive_data.rankings.forEach((r: any, idx: number) => {
+      compData.push([idx + 1, r.url, r.overall_score, r.overall_label || '']);
+    });
+    const compSheet = XLSX.utils.aoa_to_sheet(compData);
+    compSheet['!cols'] = [{ wch: 6 }, { wch: 50 }, { wch: 8 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, compSheet, 'Competitors');
+  }
+
+  // Sheet 6: Topic Clusters (from DataForSEO link analysis)
+  const clusters = report.link_analysis?.clusters || report.topic_clusters;
+  if (clusters?.length) {
+    const clusterData: any[][] = [['Cluster', 'Pages', 'Coherence Score', 'Dominant Category']];
+    for (const cluster of clusters) {
+      clusterData.push([
+        cluster.prefix || cluster.name || '',
+        cluster.page_count ?? 0,
+        cluster.coherence_score != null ? Math.round(cluster.coherence_score * 100) + '%' : 'N/A',
+        cluster.dominant_category || '',
+      ]);
+    }
+    const clusterSheet = XLSX.utils.aoa_to_sheet(clusterData);
+    clusterSheet['!cols'] = [{ wch: 25 }, { wch: 8 }, { wch: 15 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, clusterSheet, 'Topic Clusters');
   }
 
   // Generate file

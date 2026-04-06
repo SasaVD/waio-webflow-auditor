@@ -16,11 +16,14 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_USE_SANDBOX = os.environ.get("DATAFORSEO_USE_SANDBOX", "").lower() in ("true", "1", "yes")
+# Default to sandbox unless DATAFORSEO_USE_SANDBOX is explicitly "false" or "0"
+# This prevents accidental charges during development/testing
+_sandbox_val = os.environ.get("DATAFORSEO_USE_SANDBOX", "true").lower()
+_USE_SANDBOX = _sandbox_val not in ("false", "0", "no")
 BASE_URL = "https://sandbox.dataforseo.com/v3/on_page" if _USE_SANDBOX else "https://api.dataforseo.com/v3/on_page"
 
 if _USE_SANDBOX:
-    logger.info("Using DataForSEO SANDBOX mode")
+    logger.info("Using DataForSEO SANDBOX mode (set DATAFORSEO_USE_SANDBOX=false for live)")
 else:
     logger.info("Using DataForSEO LIVE mode")
 

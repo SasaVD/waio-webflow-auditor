@@ -136,6 +136,24 @@ async def save_audit_history(url: str, audit_type: str, overall_score: int, over
         )
         await db.commit()
 
+async def update_audit_report(audit_id, report_updates: dict):
+    """Merge new data into a saved audit's report_json (SQLite fallback)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT report_json FROM audit_history WHERE id = ?", (str(audit_id),)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return
+        existing = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        existing.update(report_updates)
+        await db.execute(
+            "UPDATE audit_history SET report_json = ? WHERE id = ?",
+            (json.dumps(existing), str(audit_id)),
+        )
+        await db.commit()
+
+
 async def get_audit_history(url: str) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
     async with aiosqlite.connect(DB_PATH) as db:

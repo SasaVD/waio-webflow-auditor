@@ -29,7 +29,8 @@ from pdf_generator import generate_pdf
 from md_generator import generate_markdown
 from email_sender import send_report_email
 from db_router import (init_db, close_db, create_job, get_job_status, get_single_page_audit,
-                       save_audit_history, get_audit_history, get_audit_by_id, list_all_audits,
+                       save_audit_history, update_audit_report, get_audit_history,
+                       get_audit_by_id, list_all_audits,
                        create_schedule, get_schedules, update_schedule, delete_schedule,
                        save_dataforseo_task, update_dataforseo_task,
                        get_dataforseo_task, get_dataforseo_task_by_audit,
@@ -61,6 +62,10 @@ from cms_migration_auditor import run_migration_assessment
 from wdf_idf_auditor import run_wdf_idf_analysis
 from interlinking_auditor import find_interlinking_opportunities
 from knowledge_base_generator import generate_knowledge_base, export_jsonl_bytes
+from google_nlp_client import (
+    classify_text as nlp_classify_text,
+    is_configured as is_nlp_configured,
+)
 import cross_audit_queries
 import json
 import uuid
@@ -246,10 +251,14 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
     Runs the full 10-pillar audit plus premium modules."""
     url = str(request.url)
     audit_id = uuid.uuid4()
-    logger.info(f"Starting premium audit for {url} (audit_id={audit_id})")
+    logger.info("=== PREMIUM AUDIT START ===")
+    logger.info(f"URL: {url}, audit_id={audit_id}")
+    logger.info(f"Config: DataForSEO={is_dataforseo_configured()}, NLP={is_nlp_configured()}, competitors={len(request.competitor_urls)}")
     try:
         html_content, soup = await fetch_page(url)
+        logger.info(f"Page fetched: {len(html_content)} bytes")
 
+        # ── Phase 1: 10-pillar deterministic audit (always runs) ──
         html_res = run_html_audit(soup, html_content)
         sd_res = run_structured_data_audit(html_content, url)
         css_js_res = run_css_js_audit(soup, html_content)
@@ -262,19 +271,129 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
 
         scores = compile_scores(html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, il_res)
         report = generate_report(url, html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, scores, il_res, tier="premium")
+        logger.info(f"10-pillar audit complete: score={report.get('overall_score')}")
 
-        # Sprint 2C: Auto competitor benchmarking
+        # ── Initialize all premium keys with null defaults ──
+        # Frontend checks these keys; null = "not available", missing = crash
+        report["executive_summary"] = None
+        report["webflow_fixes"] = None
+        report["competitive_data"] = None
+        report["cms_detection"] = None
+        report["content_profile"] = None
+        report["wdf_idf"] = None
+        report["migration_assessment"] = None
+        report["nlp_analysis"] = None
+        report["link_analysis"] = None
+        report["crawl_stats"] = None
+        report["crawl_status"] = "not_configured"
+        report["crawl_task_id"] = None
+
+        # ── Phase 2: Premium modules (each wrapped in try/except) ──
+
+        # Sprint 2C: Competitor benchmarking
         competitive_data = None
         if request.competitor_urls:
-            logger.info(f"Running competitor benchmarking against {len(request.competitor_urls)} URLs")
-            competitive_data = await run_competitive_audit(url, request.competitor_urls)
-            report["competitive_data"] = competitive_data
+            try:
+                logger.info(f"Running competitor benchmarking against {len(request.competitor_urls)} URLs")
+                competitive_data = await run_competitive_audit(url, request.competitor_urls)
+                report["competitive_data"] = competitive_data
+                logger.info(f"Competitor benchmark complete: {len(competitive_data.get('rankings', []))} ranked")
+            except Exception as e:
+                logger.warning(f"Competitor benchmarking failed (non-fatal): {e}")
 
         # Sprint 2A: Executive summary (with competitor context if available)
-        report["executive_summary"] = generate_executive_summary(report, competitive_data)
+        try:
+            report["executive_summary"] = generate_executive_summary(report, competitive_data)
+            logger.info(f"Executive summary generated: {len(report['executive_summary'])} chars")
+        except Exception as e:
+            logger.warning(f"Executive summary failed (non-fatal): {e}")
 
-        # Sprint 2B: Attach matched Webflow fixes
-        report["webflow_fixes"] = match_fixes_to_findings(report)
+        # Sprint 2B: Matched Webflow fix instructions
+        try:
+            report["webflow_fixes"] = match_fixes_to_findings(report)
+            fix_count = len(report["webflow_fixes"]) if report["webflow_fixes"] else 0
+            logger.info(f"Webflow fixes matched: {fix_count} fixes")
+        except Exception as e:
+            logger.warning(f"Webflow fix matching failed (non-fatal): {e}")
+
+        # Sprint 3F: CMS detection on homepage HTML (zero-cost)
+        try:
+            parsed = urlparse(url)
+            domain = parsed.hostname or parsed.netloc
+            cms_result = await detect_cms(html_content, response_headers=None, domain=domain)
+            report["cms_detection"] = cms_result.to_dict()
+            logger.info(f"CMS detected: {cms_result.platform} (confidence={cms_result.confidence})")
+        except Exception as e:
+            logger.warning(f"CMS detection failed (non-fatal): {e}")
+
+        # Sprint 4A: Content extraction on homepage (Trafilatura)
+        extracted = None
+        try:
+            extracted = extract_content(html_content, url)
+            report["content_profile"] = build_content_profile(
+                url, extracted.clean_text, extracted.h1_text, extracted.title,
+            ).to_dict()
+            logger.info(f"Content extracted: {extracted.word_count} words via {extracted.extraction_method}")
+        except Exception as e:
+            logger.warning(f"Content extraction failed (non-fatal): {e}")
+
+        # Sprint 3E: Google NLP classification on homepage (if configured)
+        if is_nlp_configured() and request.nlp_classification and extracted and extracted.clean_text:
+            try:
+                categories = await nlp_classify_text(extracted.clean_text)
+                if categories:
+                    primary = categories[0]
+                    report["nlp_analysis"] = {
+                        "detected_industry": primary.category,
+                        "industry_confidence": primary.confidence,
+                        "all_categories": [
+                            {"category": c.category, "confidence": c.confidence}
+                            for c in categories
+                        ],
+                    }
+                    logger.info(f"NLP classification: {primary.category} ({primary.confidence:.2f})")
+                else:
+                    logger.info("NLP classification returned no categories (text too short?)")
+            except Exception as e:
+                logger.warning(f"NLP classification failed (non-fatal): {e}")
+
+        # Sprint 4B: WDF*IDF gap analysis (if keyword or competitors provided)
+        if request.target_keyword or request.competitor_urls:
+            try:
+                target_text = extracted.clean_text if extracted else ""
+                if target_text and len(target_text.split()) > 20:
+                    wdf_result = await run_wdf_idf_analysis(
+                        target_url=url,
+                        target_text=target_text,
+                        competitor_urls=request.competitor_urls or None,
+                        target_keyword=request.target_keyword,
+                    )
+                    report["wdf_idf"] = wdf_result.to_dict()
+                    logger.info(f"WDF*IDF: coverage={wdf_result.coverage_score}%, {len(wdf_result.gap_terms)} gaps")
+                else:
+                    logger.info("WDF*IDF skipped: insufficient extracted text")
+            except Exception as e:
+                logger.warning(f"WDF*IDF analysis failed (non-fatal): {e}")
+
+        # Sprint 4E: CMS migration assessment (any detected platform except webflow/unknown)
+        detected_platform = (report.get("cms_detection") or {}).get("platform", "unknown")
+        if detected_platform not in ("webflow", "unknown"):
+            try:
+                all_findings = []
+                for cat_data in report.get("categories", {}).values():
+                    for chk in (cat_data.get("checks") or {}).values():
+                        all_findings.extend(chk.get("findings") or [])
+                migration = run_migration_assessment(
+                    source_cms=detected_platform,
+                    total_pages=request.max_pages,
+                    audit_findings=all_findings,
+                )
+                report["migration_assessment"] = migration.to_dict()
+                from cms_migration_auditor import CMS_TIER
+                cms_tier = CMS_TIER.get(detected_platform, 3)
+                logger.info(f"Migration assessment (tier {cms_tier}): {detected_platform} -> webflow")
+            except Exception as e:
+                logger.warning(f"Migration assessment failed (non-fatal): {e}")
 
         # Sprint 3A: Submit DataForSEO site-wide crawl (async — runs in background)
         if is_dataforseo_configured():
@@ -296,75 +415,24 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
             except Exception as e:
                 logger.warning(f"DataForSEO task submission failed (non-fatal): {e}")
                 report["crawl_status"] = "unavailable"
-        else:
-            report["crawl_status"] = "not_configured"
 
-        # Sprint 3F: CMS detection on homepage HTML (zero-cost)
-        try:
-            parsed = urlparse(url)
-            domain = parsed.hostname or parsed.netloc
-            cms_result = await detect_cms(html_content, response_headers=None, domain=domain)
-            report["cms_detection"] = cms_result.to_dict()
-            logger.info(f"CMS detected: {cms_result.platform} (confidence={cms_result.confidence})")
-        except Exception as e:
-            logger.warning(f"CMS detection failed (non-fatal): {e}")
-            report["cms_detection"] = None
-
-        # Sprint 4A: Content extraction on homepage (Trafilatura)
-        try:
-            extracted = extract_content(html_content, url)
-            report["content_profile"] = build_content_profile(
-                url, extracted.clean_text, extracted.h1_text, extracted.title,
-            ).to_dict()
-            logger.info(f"Content extracted: {extracted.word_count} words via {extracted.extraction_method}")
-        except Exception as e:
-            logger.warning(f"Content extraction failed (non-fatal): {e}")
-            report["content_profile"] = None
-
-        # Sprint 4B: WDF*IDF gap analysis (if keyword or competitors provided)
-        if request.target_keyword or request.competitor_urls:
-            try:
-                target_text = extracted.clean_text if 'extracted' in dir() else ""
-                if target_text and len(target_text.split()) > 20:
-                    wdf_result = await run_wdf_idf_analysis(
-                        target_url=url,
-                        target_text=target_text,
-                        competitor_urls=request.competitor_urls or None,
-                        target_keyword=request.target_keyword,
-                    )
-                    report["wdf_idf"] = wdf_result.to_dict()
-                    logger.info(f"WDF*IDF: coverage={wdf_result.coverage_score}%, {len(wdf_result.gap_terms)} gaps")
-            except Exception as e:
-                logger.warning(f"WDF*IDF analysis failed (non-fatal): {e}")
-
-        # Sprint 4E: CMS migration assessment (any detected platform except webflow/unknown)
-        detected_platform = (report.get("cms_detection") or {}).get("platform", "unknown")
-        if detected_platform not in ("webflow", "unknown"):
-            try:
-                all_findings = []
-                for cat_data in report.get("categories", {}).values():
-                    for chk in (cat_data.get("checks") or {}).values():
-                        all_findings.extend(chk.get("findings") or [])
-                migration = run_migration_assessment(
-                    source_cms=detected_platform,
-                    total_pages=request.max_pages,
-                    audit_findings=all_findings,
-                )
-                report["migration_assessment"] = migration.to_dict()
-                from cms_migration_auditor import CMS_TIER
-                tier = CMS_TIER.get(detected_platform, 3)
-                logger.info(f"Migration assessment (tier {tier}): {detected_platform} -> webflow")
-            except Exception as e:
-                logger.warning(f"Migration assessment failed (non-fatal): {e}")
-
+        # ── Phase 3: Persist to database ──
         audit_type = "competitive" if competitive_data else "single"
+
+        # Log final report keys for debugging
+        premium_keys = ["executive_summary", "webflow_fixes", "competitive_data",
+                        "cms_detection", "content_profile", "wdf_idf", "nlp_analysis",
+                        "link_analysis", "crawl_stats", "migration_assessment"]
+        populated = [k for k in premium_keys if report.get(k) is not None]
+        logger.info(f"Premium data populated: {populated}")
+
         await save_audit_history(
             url, audit_type,
             report.get("overall_score", 0), report.get("overall_label", "N/A"),
             report, tier="premium", audit_id=audit_id,
         )
 
-        # Sprint 3F: Persist CMS detection to database
+        # Persist CMS detection to database
         if report.get("cms_detection") and report["cms_detection"].get("platform") != "unknown":
             try:
                 cms = report["cms_detection"]
@@ -376,7 +444,7 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
             except Exception as e:
                 logger.warning(f"Failed to save CMS detection: {e}")
 
-        # Sprint 4E: Persist migration assessment to database
+        # Persist migration assessment to database
         if report.get("migration_assessment"):
             try:
                 await save_migration_assessment(
@@ -394,7 +462,15 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
             except Exception as e:
                 logger.warning(f"Failed to save DataForSEO task record: {e}")
 
+            # Launch background polling task to fetch crawl results when ready.
+            # This is the PRIMARY mechanism — the pingback is a bonus accelerator.
+            asyncio.create_task(
+                _poll_and_enrich_crawl(report["crawl_task_id"], str(audit_id))
+            )
+            logger.info(f"Background poller launched for DataForSEO task {report['crawl_task_id']}")
+
         report["audit_id"] = str(audit_id)
+        logger.info("=== PREMIUM AUDIT COMPLETE ===")
         return report
 
     except Exception as e:
@@ -499,16 +575,78 @@ async def get_fix_for_finding(finding_pattern: str):
 
 # --- DataForSEO Crawl Endpoints (Sprint 3A) ---
 
+
+async def _poll_and_enrich_crawl(task_id: str, audit_id: str):
+    """Poll DataForSEO summary until crawl completes, then enrich the audit report.
+
+    This is the PRIMARY mechanism for collecting crawl results. The pingback
+    endpoint is a bonus accelerator — if it fires first, `update_dataforseo_task`
+    will already have status='completed' and this poller will skip straight to
+    enrichment on its next iteration.
+    """
+    max_attempts = 30  # 30 × 20s = 10 minutes max wait
+    for attempt in range(1, max_attempts + 1):
+        await asyncio.sleep(20)
+
+        try:
+            # Check if the pingback already handled this task
+            task_record = await get_dataforseo_task(task_id)
+            if task_record and task_record.get("status") == "completed":
+                logger.info(
+                    f"DataForSEO task {task_id} already completed (likely via pingback), "
+                    "checking if enrichment already ran..."
+                )
+                # Check if the audit report already has link_analysis
+                audit = await get_audit_by_id(audit_id)
+                if audit and audit.get("report_json"):
+                    rj = audit["report_json"]
+                    if isinstance(rj, str):
+                        rj = json.loads(rj)
+                    if rj.get("link_analysis") and rj.get("crawl_status") == "completed":
+                        logger.info(f"Audit {audit_id} already enriched, poller exiting")
+                        return
+                # Pingback marked it completed but enrichment didn't run — do it now
+                dfs_client = DataForSEOClient()
+                summary = await dfs_client.get_summary(task_id)
+                await _enrich_report_from_crawl(task_id, dfs_client, summary)
+                return
+
+            # Poll DataForSEO for crawl progress
+            dfs_client = DataForSEOClient()
+            summary = await dfs_client.get_summary(task_id)
+            await dfs_client.close()
+
+            crawl_progress = summary.get("crawl_progress", "unknown")
+            pages_crawled = summary.get("pages_crawled", 0)
+            pages_count = summary.get("pages_count", 0)
+            logger.info(
+                f"DataForSEO poll {attempt}/{max_attempts}: task={task_id} "
+                f"progress={crawl_progress} pages={pages_crawled}/{pages_count}"
+            )
+
+            if crawl_progress == "finished":
+                await update_dataforseo_task(task_id, status="completed", summary=summary)
+                dfs_client = DataForSEOClient()
+                await _enrich_report_from_crawl(task_id, dfs_client, summary)
+                return
+
+        except Exception as e:
+            logger.warning(f"DataForSEO poll error (attempt {attempt}): {e}")
+
+    logger.warning(
+        f"DataForSEO crawl timed out after {max_attempts * 20}s for task {task_id}, "
+        f"audit {audit_id}. Results can still arrive via pingback or manual trigger."
+    )
+
+
 @app.get("/api/dataforseo/pingback")
-async def dataforseo_pingback(task_id: str):
+async def dataforseo_pingback(task_id: str, background_tasks: BackgroundTasks):
     """Webhook called by DataForSEO when a crawl task finishes.
     The $id in the pingback URL gets replaced with the actual task_id."""
     logger.info(f"DataForSEO pingback received for task {task_id}")
     try:
-        # Fetch the crawl summary from DataForSEO
         dfs_client = DataForSEOClient()
         summary = await dfs_client.get_summary(task_id)
-        await dfs_client.close()
 
         crawl_progress = summary.get("crawl_progress", "unknown")
         status = "completed" if crawl_progress == "finished" else "failed"
@@ -519,6 +657,30 @@ async def dataforseo_pingback(task_id: str):
             f"{summary.get('pages_count', 0)} pages, "
             f"{summary.get('internal_links_count', 0)} internal links"
         )
+
+        # If crawl completed, check if the poller already enriched, then enrich if not
+        if status == "completed":
+            # Check if enrichment already happened (from the polling task)
+            task_record = await get_dataforseo_task(task_id)
+            audit_id = task_record.get("audit_id") if task_record else None
+            already_enriched = False
+            if audit_id:
+                audit = await get_audit_by_id(audit_id)
+                if audit and audit.get("report_json"):
+                    rj = audit["report_json"]
+                    if isinstance(rj, str):
+                        rj = json.loads(rj)
+                    already_enriched = bool(rj.get("link_analysis") and rj.get("crawl_status") == "completed")
+
+            if already_enriched:
+                logger.info(f"Pingback: audit {audit_id} already enriched by poller, skipping")
+                await dfs_client.close()
+            else:
+                background_tasks.add_task(
+                    _enrich_report_from_crawl, task_id, dfs_client, summary
+                )
+        else:
+            await dfs_client.close()
     except DataForSEOError as e:
         logger.error(f"DataForSEO pingback processing failed: {e}")
         await update_dataforseo_task(task_id, status="failed")
@@ -526,6 +688,93 @@ async def dataforseo_pingback(task_id: str):
         logger.error(f"Unexpected error in DataForSEO pingback: {e}")
 
     return {"status": "ok"}
+
+
+async def _enrich_report_from_crawl(
+    task_id: str, dfs_client: DataForSEOClient, summary: dict
+):
+    """Background task: fetch DataForSEO pages/links, build link graph,
+    and merge enriched data into the saved audit report."""
+    try:
+        # Find the audit_id associated with this task
+        task_record = await get_dataforseo_task(task_id)
+        if not task_record or not task_record.get("audit_id"):
+            logger.warning(f"No audit_id found for DataForSEO task {task_id}, skipping enrichment")
+            await dfs_client.close()
+            return
+        audit_id = task_record["audit_id"]
+
+        # Look up the audit to get the homepage URL
+        audit_record = await get_audit_by_id(audit_id)
+        if not audit_record:
+            logger.warning(f"Audit {audit_id} not found for enrichment")
+            await dfs_client.close()
+            return
+        homepage_url = audit_record["url"]
+
+        logger.info(f"Enriching audit {audit_id} with DataForSEO crawl data from task {task_id}")
+
+        # Fetch all pages and links from DataForSEO (GET endpoints are FREE)
+        pages_data = await dfs_client.get_all_pages(task_id)
+        links_data = await dfs_client.get_all_links(task_id)
+        await dfs_client.close()
+
+        logger.info(f"Fetched {len(pages_data)} pages, {len(links_data)} links from DataForSEO")
+
+        # Build crawl_stats
+        crawl_stats = {
+            "pages_crawled": summary.get("pages_crawled", 0),
+            "pages_discovered": summary.get("pages_count", 0),
+            "internal_links": summary.get("internal_links_count", 0),
+            "external_links": summary.get("external_links_count", 0),
+            "broken_links": summary.get("broken_links", 0),
+            "broken_resources": summary.get("broken_resources", 0),
+        }
+
+        # Build link graph + topic clusters using link_graph_auditor
+        link_analysis = build_link_graph(
+            pages_data=pages_data,
+            links_data=links_data,
+            homepage_url=homepage_url,
+        )
+
+        # Merge enriched data into the saved report
+        report_updates = {
+            "crawl_status": "completed",
+            "crawl_stats": crawl_stats,
+            "link_analysis": link_analysis,
+        }
+
+        await update_audit_report(audit_id, report_updates)
+        logger.info(
+            f"Audit {audit_id} enriched: "
+            f"{len(link_analysis.get('graph_data', {}).get('nodes', []))} graph nodes, "
+            f"{len(link_analysis.get('clusters', []))} clusters"
+        )
+
+        # Also persist link graph edges to the dedicated table
+        try:
+            edges = []
+            for link in links_data:
+                if isinstance(link, dict):
+                    edges.append({
+                        "source_url": link.get("page_from", ""),
+                        "target_url": link.get("page_to", ""),
+                        "anchor_text": link.get("anchor", ""),
+                        "is_nofollow": link.get("dofollow", True) is False,
+                    })
+            if edges:
+                await save_link_graph_edges(audit_id, edges)
+                logger.info(f"Saved {len(edges)} link graph edges for audit {audit_id}")
+        except Exception as e:
+            logger.warning(f"Failed to save link graph edges (non-fatal): {e}")
+
+    except Exception as e:
+        logger.error(f"Report enrichment failed for task {task_id}: {e}", exc_info=True)
+        try:
+            await dfs_client.close()
+        except Exception:
+            pass
 
 
 @app.get("/api/audit/crawl-status/{task_id}")
@@ -758,16 +1007,68 @@ async def get_ga4_traffic(
 @app.get("/api/audit/link-graph/{audit_id}")
 async def get_audit_link_graph(audit_id: str):
     """Return the link graph data for D3 visualization.
-    Data is populated after DataForSEO crawl completes and link_graph_auditor runs."""
+    Prefers the full link_analysis from report_json (has stats, orphans, hubs, clusters).
+    Falls back to reconstructing from link_graph + page_content DB tables."""
+    # Primary source: link_analysis stored in report_json by _enrich_report_from_crawl
+    audit = await get_audit_by_id(audit_id)
+    if audit and audit.get("report_json"):
+        rj = audit["report_json"]
+        if isinstance(rj, str):
+            rj = json.loads(rj)
+        link_analysis = rj.get("link_analysis")
+        if link_analysis and link_analysis.get("graph", {}).get("nodes"):
+            return link_analysis
+
+    # Fallback: reconstruct from DB tables (limited format — no stats/hubs)
     data = await get_link_graph_data(audit_id)
     if not data:
-        raise HTTPException(status_code=404, detail="Link graph data not found for this audit")
-    return data
+        raise HTTPException(status_code=404, detail="Link graph data not available yet. It will appear after the site crawl completes.")
+
+    # Wrap in the format the LinkGraph component expects
+    nodes = data.get("nodes", [])
+    links = data.get("links", [])
+    for node in nodes:
+        node.setdefault("cluster", -1)
+        node.setdefault("inbound", 0)
+        node.setdefault("outbound", 0)
+    return {
+        "graph": {"nodes": nodes, "links": links},
+        "stats": {
+            "total_pages": len(nodes),
+            "total_internal_links": len(links),
+            "total_edges": len(links),
+            "avg_inbound_links": round(len(links) / max(len(nodes), 1), 1),
+            "max_depth": max((n.get("depth") or 0 for n in nodes), default=0),
+            "homepage_inbound": 0,
+        },
+        "orphans": {
+            "orphan_count": sum(1 for n in nodes if n.get("is_orphan")),
+            "total_known_urls": len(nodes),
+            "crawled_count": len(nodes),
+        },
+        "hubs": [],
+        "clusters": [],
+    }
 
 
 @app.get("/api/audit/clusters/{audit_id}")
 async def get_audit_clusters(audit_id: str):
     """Return topic cluster data for an audit."""
+    # Primary source: link_analysis in report_json
+    audit = await get_audit_by_id(audit_id)
+    if audit and audit.get("report_json"):
+        rj = audit["report_json"]
+        if isinstance(rj, str):
+            rj = json.loads(rj)
+        link_analysis = rj.get("link_analysis")
+        if link_analysis:
+            return {
+                "audit_id": audit_id,
+                "clusters": link_analysis.get("clusters", []),
+                "industry": link_analysis.get("industry", {}),
+            }
+
+    # Fallback: DB tables
     data = await get_link_graph_data(audit_id)
     if not data:
         raise HTTPException(status_code=404, detail="No link graph data found for this audit")
