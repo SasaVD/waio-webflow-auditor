@@ -514,7 +514,7 @@ export default function DashboardContentIntelligencePage() {
                     <XAxis
                       type="number"
                       domain={[0, 'auto']}
-                      tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
+                      tickFormatter={((v: any) => `${(Number(v) * 100).toFixed(0)}%`) as any}
                       tick={{ fontSize: 10, fill: '#64748B' }}
                       axisLine={false}
                       tickLine={false}
@@ -563,7 +563,7 @@ export default function DashboardContentIntelligencePage() {
                         ))}
                       </Pie>
                       <Tooltip
-                        formatter={(value: number | string | undefined, name: string | number | undefined) => [`${Number(value || 0)} entities`, String(name || '')]}
+                        formatter={((value: any, name: any) => [`${Number(value)} entities`, String(name)]) as any}
                         contentStyle={{
                           backgroundColor: '#151B28',
                           border: '1px solid #1E293B',
