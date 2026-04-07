@@ -108,7 +108,7 @@ function truncateUrl(url: string, maxLen = 30): string {
 /* ─── Component ─── */
 
 export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
-  const graphRef = useRef<ForceGraphMethods<NodeObject<GraphNode>, LinkObject<GraphNode, GraphLink>>>();
+  const graphRef = useRef<ForceGraphMethods<NodeObject<GraphNode>, LinkObject<GraphNode, GraphLink>>>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [showOrphans, setShowOrphans] = useState(true);
