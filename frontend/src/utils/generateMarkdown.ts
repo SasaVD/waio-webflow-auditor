@@ -147,11 +147,56 @@ export function generateMarkdown(report: Record<string, any>): string {
 
   // NLP Analysis (premium)
   if (report.nlp_analysis) {
+    const nlp = report.nlp_analysis;
     lines.push('## Content Intelligence (NLP)');
     lines.push('');
-    lines.push(`**Detected Industry:** ${report.nlp_analysis.detected_industry}`);
-    lines.push(`**Confidence:** ${Math.round((report.nlp_analysis.industry_confidence ?? 0) * 100)}%`);
-    lines.push('');
+    if (nlp.detected_industry) {
+      lines.push(`**Detected Industry:** ${nlp.detected_industry}`);
+      lines.push(`**Confidence:** ${Math.round((nlp.industry_confidence ?? 0) * 100)}%`);
+      lines.push('');
+    }
+
+    // Sentiment
+    if (nlp.sentiment) {
+      lines.push(`**Content Tone:** ${nlp.sentiment.tone}`);
+      lines.push(`**Sentiment Score:** ${nlp.sentiment.score} (magnitude: ${nlp.sentiment.magnitude})`);
+      lines.push('');
+    }
+
+    // Top entities table
+    if (nlp.entities?.length) {
+      lines.push('### Top Entities');
+      lines.push('');
+      lines.push('| Entity | Type | Salience | Mentions | Wikipedia |');
+      lines.push('|--------|------|----------|----------|-----------|');
+      for (const ent of nlp.entities.slice(0, 15)) {
+        const sal = `${(ent.salience * 100).toFixed(1)}%`;
+        const wiki = ent.wikipedia_url ? `[Link](${ent.wikipedia_url})` : '—';
+        lines.push(`| ${ent.name} | ${ent.type} | ${sal} | ${ent.mentions_count ?? '—'} | ${wiki} |`);
+      }
+      lines.push('');
+    }
+
+    // SEO insights
+    if (nlp.insights) {
+      lines.push('### SEO Insights');
+      lines.push('');
+      if (nlp.insights.seo_alignment) {
+        lines.push(`- **SEO Alignment:** ${nlp.insights.seo_alignment}`);
+      }
+      if (nlp.insights.entity_diversity_score != null) {
+        lines.push(`- **Entity Diversity:** ${Math.round(nlp.insights.entity_diversity_score * 100)}%`);
+      }
+      if (nlp.insights.top_keyword_entities?.length) {
+        lines.push(`- **Key Entities:** ${nlp.insights.top_keyword_entities.join(', ')}`);
+      }
+      if (nlp.entity_focus_aligned === true) {
+        lines.push(`- **Entity-Title Alignment:** ✅ Primary entity matches page title/H1`);
+      } else if (nlp.entity_focus_aligned === false) {
+        lines.push(`- **Entity-Title Alignment:** ⚠️ Primary entity "${nlp.primary_entity}" does not match H1/title`);
+      }
+      lines.push('');
+    }
   }
 
   // Topic Clusters (from DataForSEO link analysis)

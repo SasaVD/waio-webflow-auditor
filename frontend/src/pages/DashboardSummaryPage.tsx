@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useParams, Link } from 'react-router';
 import { motion } from 'framer-motion';
-import { ArrowLeft, FileText, Info, ArrowRightLeft, Shield, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, FileText, Info, ArrowRightLeft, Shield, CheckCircle2, Brain } from 'lucide-react';
 import { useAuditStore } from '../stores/auditStore';
 
 export default function DashboardSummaryPage() {
@@ -13,6 +13,22 @@ export default function DashboardSummaryPage() {
   const migration = useMemo(() => {
     if (!report?.migration_assessment) return null;
     return report.migration_assessment as Record<string, unknown>;
+  }, [report]);
+
+  const nlp = useMemo(() => {
+    const data = report?.nlp_analysis as Record<string, any> | null;
+    if (!data) return null;
+    const industry = data.detected_industry as string | undefined;
+    const primaryTopic = data.insights?.primary_topic as string | undefined;
+    const entities = data.entities as Array<Record<string, any>> | undefined;
+    const topEntities = entities?.slice(0, 3).map((e) => e.name as string) ?? [];
+    const tone = (data.sentiment as Record<string, any>)?.tone as string | undefined;
+    return {
+      topic: primaryTopic ?? (industry ? industry.split('/').filter(Boolean).pop() : null),
+      confidence: (data.industry_confidence as number) ?? 0,
+      topEntities,
+      tone: tone ?? null,
+    };
   }, [report]);
 
   const cmsName = useMemo(() => {
@@ -76,6 +92,52 @@ export default function DashboardSummaryPage() {
           </div>
         )}
       </motion.div>
+
+      {/* Content Intelligence Brief */}
+      {nlp && nlp.topic && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="bg-surface-raised border border-border rounded-xl p-6"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Brain size={16} className="text-accent" />
+            <h2 className="text-sm font-bold text-text-muted uppercase tracking-widest">
+              Content Intelligence
+            </h2>
+          </div>
+          <div className="space-y-2 text-sm text-text-secondary leading-relaxed">
+            <p>
+              Google classifies your content as{' '}
+              <strong className="text-text">{nlp.topic}</strong> with{' '}
+              <strong className="text-text">{Math.round(nlp.confidence * 100)}%</strong> confidence.
+            </p>
+            {nlp.topEntities.length > 0 && (
+              <p>
+                Top content entities:{' '}
+                {nlp.topEntities.map((e, i) => (
+                  <span key={i}>
+                    <strong className="text-text">{e}</strong>
+                    {i < nlp.topEntities.length - 1 ? ', ' : ''}
+                  </span>
+                ))}
+              </p>
+            )}
+            {nlp.tone && (
+              <p>
+                Content tone: <strong className="text-text">{nlp.tone}</strong>
+              </p>
+            )}
+          </div>
+          <Link
+            to={`/dashboard/${auditId}/content-intelligence`}
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-accent hover:text-accent-hover transition-colors"
+          >
+            View full analysis →
+          </Link>
+        </motion.div>
+      )}
 
       {/* Migration Assessment Section */}
       {migration && cmsName && (

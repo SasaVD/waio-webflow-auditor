@@ -10,6 +10,8 @@ import {
   AlertCircle,
   Info,
   ExternalLink,
+  Brain,
+  ChevronRight,
   FileCode,
   FileJson,
   BookOpen,
@@ -156,6 +158,22 @@ export default function DashboardOverviewPage() {
     return {
       platform: (det?.platform as string) ?? 'unknown',
       confidence: (det?.confidence as number) ?? 0,
+    };
+  }, [report]);
+
+  // NLP content intelligence
+  const nlpInfo = useMemo(() => {
+    const nlp = report?.nlp_analysis as Record<string, any> | null;
+    if (!nlp) return null;
+    const industry = nlp.detected_industry as string | undefined;
+    const entities = nlp.entities as Array<Record<string, any>> | undefined;
+    const primaryTopic = nlp.insights?.primary_topic as string | undefined;
+    return {
+      industry: primaryTopic ?? (industry ? industry.split('/').filter(Boolean).pop() : null),
+      confidence: (nlp.industry_confidence as number) ?? 0,
+      entityCount: entities?.length ?? 0,
+      primaryEntity: (nlp.primary_entity as string) ?? null,
+      tone: (nlp.sentiment as Record<string, any>)?.tone as string | undefined,
     };
   }, [report]);
 
@@ -411,6 +429,53 @@ export default function DashboardOverviewPage() {
           })}
         </div>
       </motion.div>
+
+      {/* Content Intelligence Card */}
+      {nlpInfo && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.22 }}
+        >
+          <Link
+            to={`/dashboard/${report.audit_id}/content-intelligence`}
+            className="block bg-surface-raised border border-border rounded-xl p-5 hover:border-accent/30 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-accent/10 rounded-xl flex items-center justify-center group-hover:bg-accent/20 transition-all">
+                  <Brain size={18} className="text-accent" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-text">Content Intelligence</h2>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    Google classifies your content as{' '}
+                    <strong className="text-text-secondary">{nlpInfo.industry}</strong>
+                    {nlpInfo.confidence > 0 && (
+                      <> ({Math.round(nlpInfo.confidence * 100)}% confidence)</>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                {nlpInfo.entityCount > 0 && (
+                  <div className="text-right hidden sm:block">
+                    <div className="text-lg font-bold text-text font-heading">{nlpInfo.entityCount}</div>
+                    <div className="text-[10px] text-text-muted">Entities</div>
+                  </div>
+                )}
+                {nlpInfo.tone && (
+                  <div className="text-right hidden md:block">
+                    <div className="text-xs font-semibold text-text-secondary">{nlpInfo.tone}</div>
+                    <div className="text-[10px] text-text-muted">Tone</div>
+                  </div>
+                )}
+                <ChevronRight size={16} className="text-text-muted group-hover:text-accent transition-colors" />
+              </div>
+            </div>
+          </Link>
+        </motion.div>
+      )}
 
       {/* Migration Intelligence — only for non-Webflow sites */}
       {migration && cmsInfo.platform !== 'webflow' && (

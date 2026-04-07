@@ -32,6 +32,9 @@ const DashboardExportPage = lazy(
 const DashboardPillarPage = lazy(
   () => import('./pages/DashboardPillarPage')
 );
+const DashboardContentIntelligencePage = lazy(
+  () => import('./pages/DashboardContentIntelligencePage')
+);
 const DashboardPagesPage = lazy(
   () => import('./pages/DashboardPagesPage')
 );
@@ -152,6 +155,14 @@ export const router = createBrowserRouter([
         element: (
           <Suspense fallback={dashboardFallback}>
             <DashboardPillarPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'content-intelligence',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardContentIntelligencePage />
           </Suspense>
         ),
       },

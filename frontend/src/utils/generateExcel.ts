@@ -166,7 +166,48 @@ export function generateExcel(report: Record<string, any>): void {
     XLSX.utils.book_append_sheet(wb, compSheet, 'Competitors');
   }
 
-  // Sheet 6: Topic Clusters (from DataForSEO link analysis)
+  // Sheet 6: Content Intelligence (NLP)
+  if (report.nlp_analysis) {
+    const nlp = report.nlp_analysis;
+    const nlpData: any[][] = [['Content Intelligence (NLP Analysis)']];
+    nlpData.push(['']);
+    if (nlp.detected_industry) {
+      nlpData.push(['Detected Industry', nlp.detected_industry]);
+      nlpData.push(['Confidence', nlp.industry_confidence != null ? `${Math.round(nlp.industry_confidence * 100)}%` : 'N/A']);
+    }
+    if (nlp.sentiment) {
+      nlpData.push(['Content Tone', nlp.sentiment.tone]);
+      nlpData.push(['Sentiment Score', nlp.sentiment.score]);
+      nlpData.push(['Sentiment Magnitude', nlp.sentiment.magnitude]);
+    }
+    if (nlp.insights?.seo_alignment) {
+      nlpData.push(['SEO Alignment', nlp.insights.seo_alignment]);
+    }
+    if (nlp.primary_entity) {
+      nlpData.push(['Primary Entity', nlp.primary_entity]);
+      nlpData.push(['Primary Entity Salience', nlp.primary_entity_salience != null ? `${(nlp.primary_entity_salience * 100).toFixed(1)}%` : 'N/A']);
+    }
+
+    // Entity table
+    if (nlp.entities?.length) {
+      nlpData.push(['']);
+      nlpData.push(['Entity', 'Type', 'Salience', 'Mentions', 'Wikipedia']);
+      for (const ent of nlp.entities) {
+        nlpData.push([
+          ent.name,
+          ent.type,
+          `${(ent.salience * 100).toFixed(1)}%`,
+          ent.mentions_count ?? '',
+          ent.wikipedia_url ?? '',
+        ]);
+      }
+    }
+    const nlpSheet = XLSX.utils.aoa_to_sheet(nlpData);
+    nlpSheet['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 12 }, { wch: 10 }, { wch: 50 }];
+    XLSX.utils.book_append_sheet(wb, nlpSheet, 'Content Intelligence');
+  }
+
+  // Sheet 7: Topic Clusters (from DataForSEO link analysis)
   const clusters = report.link_analysis?.clusters || report.topic_clusters;
   if (clusters?.length) {
     const clusterData: any[][] = [['Cluster', 'Pages', 'Coherence Score', 'Dominant Category']];

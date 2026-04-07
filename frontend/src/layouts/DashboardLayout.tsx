@@ -20,6 +20,7 @@ import {
   Link2,
   Network,
   FolderTree,
+  Brain,
   Accessibility,
   Radio,
   FileText,
@@ -63,6 +64,7 @@ const navGroups: NavGroup[] = [
       { icon: BookOpen, label: PILLAR_LABELS.aeo_content, href: 'pillar/ai-answer-readiness' },
       { icon: FileJson, label: PILLAR_LABELS.structured_data, href: 'pillar/rich-search-presence' },
       { icon: Layers, label: PILLAR_LABELS.rag_readiness, href: 'pillar/ai-retrieval-readiness' },
+      { icon: Brain, label: 'Content Intelligence', href: 'content-intelligence' },
     ],
   },
   {

@@ -65,6 +65,8 @@ from interlinking_auditor import find_interlinking_opportunities
 from knowledge_base_generator import generate_knowledge_base, export_jsonl_bytes
 from google_nlp_client import (
     classify_text as nlp_classify_text,
+    analyze_entities as nlp_analyze_entities,
+    analyze_sentiment as nlp_analyze_sentiment,
     is_configured as is_nlp_configured,
 )
 import cross_audit_queries
@@ -346,25 +348,133 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
         except Exception as e:
             logger.warning(f"Content extraction failed (non-fatal): {e}")
 
-        # Sprint 3E: Google NLP classification on homepage (if configured)
+        # Sprint 3E: Google NLP analysis on homepage (if configured)
         if is_nlp_configured() and request.nlp_classification and extracted and extracted.clean_text:
+            nlp_data: dict = {}
+            # Classification
             try:
                 categories = await nlp_classify_text(extracted.clean_text)
                 if categories:
                     primary = categories[0]
-                    report["nlp_analysis"] = {
-                        "detected_industry": primary.category,
-                        "industry_confidence": primary.confidence,
-                        "all_categories": [
-                            {"category": c.category, "confidence": c.confidence}
-                            for c in categories
-                        ],
-                    }
+                    nlp_data["detected_industry"] = primary.category
+                    nlp_data["industry_confidence"] = primary.confidence
+                    nlp_data["all_categories"] = [
+                        {"category": c.category, "confidence": c.confidence}
+                        for c in categories
+                    ]
                     logger.info(f"NLP classification: {primary.category} ({primary.confidence:.2f})")
                 else:
                     logger.info("NLP classification returned no categories (text too short?)")
             except Exception as e:
                 logger.warning(f"NLP classification failed (non-fatal): {e}")
+
+            # Entity analysis
+            if request.nlp_entity_analysis:
+                try:
+                    entities = await nlp_analyze_entities(extracted.clean_text)
+                    if entities:
+                        nlp_data["entities"] = [
+                            {
+                                "name": ent.name,
+                                "type": ent.entity_type,
+                                "salience": round(ent.salience, 4),
+                                "wikipedia_url": ent.wikipedia_url,
+                                "mentions_count": ent.mentions_count,
+                            }
+                            for ent in entities[:30]
+                        ]
+                        top = entities[0]
+                        nlp_data["primary_entity"] = top.name
+                        nlp_data["primary_entity_salience"] = round(top.salience, 4)
+
+                        # Entity type distribution
+                        type_counts: dict[str, int] = {}
+                        for ent in entities:
+                            type_counts[ent.entity_type] = type_counts.get(ent.entity_type, 0) + 1
+                        nlp_data["entity_type_distribution"] = type_counts
+
+                        # Entity focus alignment (does primary entity match H1/title?)
+                        if extracted.h1_text or extracted.title:
+                            title_text = (extracted.h1_text or extracted.title or "").lower()
+                            nlp_data["entity_focus_aligned"] = (
+                                top.name.lower() in title_text
+                                or any(w in title_text for w in top.name.lower().split() if len(w) > 3)
+                            )
+
+                        logger.info(f"NLP entities: {len(entities)} found, primary={top.name} ({top.salience:.2f})")
+                    else:
+                        logger.info("NLP entity analysis returned no entities")
+                except Exception as e:
+                    logger.warning(f"NLP entity analysis failed (non-fatal): {e}")
+
+            # Sentiment analysis
+            try:
+                sentiment = await nlp_analyze_sentiment(extracted.clean_text)
+                score = sentiment.score
+                magnitude = sentiment.magnitude
+                # Human-readable interpretation
+                if score <= -0.5:
+                    tone = "Negative / Critical"
+                elif score <= -0.1:
+                    tone = "Slightly Negative / Cautious"
+                elif score <= 0.1:
+                    tone = "Neutral / Factual"
+                elif score <= 0.5:
+                    tone = "Slightly Positive / Encouraging"
+                else:
+                    tone = "Positive / Enthusiastic"
+                nlp_data["sentiment"] = {
+                    "score": round(score, 3),
+                    "magnitude": round(magnitude, 3),
+                    "tone": tone,
+                }
+                logger.info(f"NLP sentiment: score={score:.2f}, magnitude={magnitude:.2f}, tone={tone}")
+            except Exception as e:
+                logger.warning(f"NLP sentiment analysis failed (non-fatal): {e}")
+
+            # Content stats
+            nlp_data["content_stats"] = {
+                "word_count": extracted.word_count,
+                "language": extracted.language,
+                "extracted_via": extracted.extraction_method,
+            }
+
+            # Derived insights
+            try:
+                insights: dict = {}
+                if nlp_data.get("detected_industry"):
+                    parts = nlp_data["detected_industry"].strip("/").split("/")
+                    insights["primary_topic"] = parts[-1] if parts else nlp_data["detected_industry"]
+                    insights["topic_confidence"] = nlp_data.get("industry_confidence", 0)
+                if nlp_data.get("entity_type_distribution"):
+                    dominant_type = max(nlp_data["entity_type_distribution"], key=nlp_data["entity_type_distribution"].get)
+                    insights["entity_focus"] = dominant_type.lower().replace("_", " ")
+                if nlp_data.get("sentiment"):
+                    insights["content_tone"] = nlp_data["sentiment"]["tone"]
+                if nlp_data.get("entities"):
+                    unique_types = len(nlp_data.get("entity_type_distribution", {}))
+                    insights["entity_diversity_score"] = round(min(unique_types / 8.0, 1.0), 2)
+                    insights["top_keyword_entities"] = [
+                        e["name"] for e in nlp_data["entities"][:8]
+                        if e["type"] in ("OTHER", "CONSUMER_GOOD", "WORK_OF_ART", "ORGANIZATION")
+                    ][:5]
+
+                # SEO alignment check
+                conf = nlp_data.get("industry_confidence", 0)
+                aligned = nlp_data.get("entity_focus_aligned")
+                if conf >= 0.7 and aligned is True:
+                    insights["seo_alignment"] = "strong"
+                elif conf >= 0.5 or aligned is True:
+                    insights["seo_alignment"] = "moderate"
+                else:
+                    insights["seo_alignment"] = "weak"
+
+                nlp_data["insights"] = insights
+            except Exception as e:
+                logger.warning(f"NLP insights derivation failed (non-fatal): {e}")
+
+            if nlp_data:
+                report["nlp_analysis"] = nlp_data
 
         # Sprint 4B: WDF*IDF gap analysis (if keyword or competitors provided)
         if request.target_keyword or request.competitor_urls:
