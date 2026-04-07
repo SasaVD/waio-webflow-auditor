@@ -19,11 +19,25 @@ logger = logging.getLogger(__name__)
 # ── Data Structures ───────────────────────────────────────────────
 
 
-def _normalize_url(url: str) -> str:
-    """Strip trailing slash and fragment for consistent comparison."""
+def _normalize_url(url: str, base_url: str | None = None) -> str:
+    """Strip trailing slash and fragment for consistent comparison.
+
+    If *url* is a relative path (no scheme/netloc) and *base_url* is supplied,
+    resolve it against the base.  DataForSEO ``/v3/on_page/links`` can return
+    bare paths like ``/blog`` instead of ``https://example.com/blog``.
+    """
     parsed = urlparse(url)
+    scheme = parsed.scheme
+    netloc = parsed.netloc
+
+    # Resolve relative URLs against the base
+    if (not scheme or not netloc) and base_url:
+        base = urlparse(base_url)
+        scheme = scheme or base.scheme or "https"
+        netloc = netloc or base.netloc
+
     path = parsed.path.rstrip("/") or "/"
-    return f"{parsed.scheme}://{parsed.netloc}{path}"
+    return f"{scheme}://{netloc}{path}"
 
 
 # ── Orphan Detection ──────────────────────────────────────────────
@@ -294,11 +308,14 @@ def build_link_graph(
     ga4_urls = ga4_urls or set()
     sitemap_urls = sitemap_urls or set()
 
+    # Derive base scheme+netloc for resolving relative URLs from DataForSEO
+    base_url = homepage_url
+
     # Build URL sets and adjacency from DataForSEO data
     crawled_urls: Set[str] = set()
     page_meta: Dict[str, Dict[str, Any]] = {}
     for page in pages_data:
-        url = _normalize_url(page.get("url", ""))
+        url = _normalize_url(page.get("url", ""), base_url)
         crawled_urls.add(url)
         page_meta[url] = {
             "status_code": page.get("status_code"),
@@ -322,9 +339,17 @@ def build_link_graph(
     outbound_counts: Dict[str, int] = defaultdict(int)
     edges: List[Dict[str, Any]] = []
 
+    # Only include navigational links (anchors), not resource links
+    # (alternate, canonical, redirect, etc.)
+    navigational_types = {"anchor", "link", ""}
+
     for link in links_data:
-        source = _normalize_url(link.get("page_from", ""))
-        target = _normalize_url(link.get("page_to", ""))
+        link_type = link.get("type", "")
+        if link_type and link_type not in navigational_types:
+            continue
+
+        source = _normalize_url(link.get("page_from", ""), base_url)
+        target = _normalize_url(link.get("page_to", ""), base_url)
         if not source or not target or source == target:
             continue
 
@@ -336,7 +361,7 @@ def build_link_graph(
             "target": target,
             "anchor": link.get("anchor", ""),
             "is_nofollow": link.get("dofollow", True) is False,
-            "link_type": link.get("type", ""),
+            "link_type": link_type,
         })
 
     # Link depth BFS

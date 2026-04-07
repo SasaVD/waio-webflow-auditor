@@ -87,11 +87,17 @@ function getClusterColor(cluster: number): string {
   return CLUSTER_COLORS[cluster % CLUSTER_COLORS.length];
 }
 
-function getNodeSize(node: GraphNode, homepageId: string | null): number {
-  if (node.id === homepageId) return 10;
-  if (node.is_orphan) return 5;
-  const base = 3;
-  return Math.min(base + Math.sqrt(node.inbound || 0) * 1.2, 14);
+function getNodeSize(
+  node: GraphNode,
+  homepageId: string | null,
+  inDegree?: Map<string, number>,
+): number {
+  if (node.id === homepageId) return 14;
+  // Use computed inDegree if node.inbound is 0 (backend data may have stale counts)
+  const inbound = (inDegree?.get(node.id) ?? 0) || node.inbound || 0;
+  if (inbound === 0) return 2.5; // Orphans / zero-inbound: tiny
+  // Logarithmic scale: 3 to 12
+  return Math.max(3, Math.min(12, 3 + Math.log2(inbound + 1) * 2));
 }
 
 function truncateUrl(url: string, maxLen = 30): string {
@@ -243,9 +249,31 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
     return () => observer.disconnect();
   }, []);
 
-  // Zoom to fit after initial render
+  // Configure forces for better clustering + zoom to fit
   useEffect(() => {
     if (!graphRef.current || !graphData) return;
+    const fg = graphRef.current;
+
+    // Stronger charge repulsion pushes unconnected nodes apart
+    // Stronger link force pulls connected nodes together → tighter clusters
+    if (layoutMode === 'force') {
+      const charge = fg.d3Force('charge');
+      if (charge) {
+        charge.strength(-120);
+        charge.distanceMax(400);
+      }
+      const link = fg.d3Force('link');
+      if (link) {
+        link.distance(30);
+        link.strength(0.7);
+      }
+      const center = fg.d3Force('center');
+      if (center) {
+        center.strength(0.05);
+      }
+      fg.d3ReheatSimulation();
+    }
+
     const timer = setTimeout(() => {
       graphRef.current?.zoomToFit(500, 60);
     }, 1500);
@@ -398,19 +426,22 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
   // Custom node rendering with zoom-aware LOD
   const nodeCanvasObject = useCallback((node: NodeObject<GraphNode>, ctx: CanvasRenderingContext2D, globalScale: number) => {
     const n = node as GraphNode;
-    const size = getNodeSize(n, homepageId);
+    const inDeg = computedStats?.inDegree;
+    const inbound = (inDeg?.get(n.id) ?? 0) || n.inbound || 0;
+    const size = getNodeSize(n, homepageId, inDeg);
     const x = node.x ?? 0;
     const y = node.y ?? 0;
+    const isOrphan = n.is_orphan || (inbound === 0 && n.id !== homepageId);
+    const isHomepage = n.id === homepageId;
 
     // Determine node color
     let color: string;
-    if (n.is_orphan) {
+    if (isOrphan) {
       color = ORPHAN_COLOR;
     } else if (filterMode === 'depth' && computedStats?.depths) {
       const depth = computedStats.depths.get(n.id) ?? 0;
       const maxD = Math.max(computedStats.maxDepth, 1);
       const t = depth / maxD;
-      // Dark (shallow) to light (deep)
       const r = Math.round(99 + t * 100);
       const g = Math.round(102 + t * 100);
       const b = Math.round(241 - t * 100);
@@ -428,27 +459,37 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
     ctx.globalAlpha = isDimmed ? 0.15 : 1;
 
     // LOD rendering
-    if (globalScale < 0.5) {
-      // Ultra-zoomed out: simple dots
+    if (globalScale < 0.4) {
+      // Extreme zoom out: just dots, sized by authority
       ctx.beginPath();
-      ctx.arc(x, y, Math.max(size * 0.5, 1.5), 0, 2 * Math.PI);
+      ctx.arc(x, y, Math.max(size * 0.4, 1), 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.fill();
-    } else if (globalScale < 1.5) {
+    } else if (globalScale < 1.2) {
       // Medium zoom: colored circles with borders for hubs
       ctx.beginPath();
       ctx.arc(x, y, size, 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.fill();
-      if (n.inbound > 10 || n.id === homepageId) {
+      if (inbound > 10 || isHomepage) {
         ctx.strokeStyle = 'rgba(255,255,255,0.6)';
         ctx.lineWidth = 1.5 / globalScale;
         ctx.stroke();
       }
-      if (n.is_orphan) {
+      if (isOrphan) {
         ctx.strokeStyle = ORPHAN_COLOR;
         ctx.lineWidth = 2 / globalScale;
         ctx.stroke();
+      }
+      // Labels for high-authority nodes even at medium zoom
+      if (inbound > 5 || isHomepage) {
+        const label = truncateUrl(n.id, 24);
+        const fontSize = Math.max(10 / globalScale, 2);
+        ctx.font = `${fontSize}px Inter, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText(label, x, y + size + 2 / globalScale);
       }
     } else {
       // Zoomed in: full detail with labels
@@ -457,18 +498,18 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
       ctx.fillStyle = color;
       ctx.fill();
 
-      if (n.inbound > 10 || n.id === homepageId) {
+      if (inbound > 5 || isHomepage) {
         ctx.strokeStyle = 'rgba(255,255,255,0.7)';
         ctx.lineWidth = 1.5 / globalScale;
         ctx.stroke();
       }
-      if (n.is_orphan) {
+      if (isOrphan) {
         ctx.strokeStyle = ORPHAN_COLOR;
         ctx.lineWidth = 2 / globalScale;
         ctx.stroke();
       }
 
-      // Label
+      // Label for all visible nodes at close zoom
       const label = truncateUrl(n.id);
       const fontSize = Math.max(10 / globalScale, 2);
       ctx.font = `${fontSize}px Inter, sans-serif`;
@@ -494,12 +535,12 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
   // Pointer area for click detection
   const nodePointerAreaPaint = useCallback((node: NodeObject<GraphNode>, paintColor: string, ctx: CanvasRenderingContext2D) => {
     const n = node as GraphNode;
-    const size = getNodeSize(n, homepageId) + 3;
+    const size = getNodeSize(n, homepageId, computedStats?.inDegree) + 3;
     ctx.beginPath();
     ctx.arc(node.x ?? 0, node.y ?? 0, size, 0, 2 * Math.PI);
     ctx.fillStyle = paintColor;
     ctx.fill();
-  }, [homepageId]);
+  }, [homepageId, computedStats]);
 
   // Link color based on highlight state
   const linkColor = useCallback((link: LinkObject<GraphNode, GraphLink>) => {
@@ -903,14 +944,18 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
       </div>
 
       {/* Stats Bar */}
-      <div className="bg-surface-raised px-6 py-3 grid grid-cols-2 md:grid-cols-5 gap-4 text-center border-t border-border">
+      <div className="bg-surface-raised px-6 py-3 grid grid-cols-3 md:grid-cols-6 gap-4 text-center border-t border-border">
         <div>
           <div className="text-lg font-bold text-text">{stats.total_pages}</div>
           <div className="text-[10px] text-text-muted uppercase tracking-wider">Pages</div>
         </div>
         <div>
+          <div className="text-lg font-bold text-text">{filteredGraphData.links.length.toLocaleString()}</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider">Links</div>
+        </div>
+        <div>
           <div className="text-lg font-bold text-text">{stats.avg_inbound_links}</div>
-          <div className="text-[10px] text-text-muted uppercase tracking-wider">Avg Links</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider">Avg Links/Page</div>
         </div>
         <div>
           <div className="text-lg font-bold text-text">{maxDepth}</div>
