@@ -563,7 +563,7 @@ export default function DashboardContentIntelligencePage() {
                         ))}
                       </Pie>
                       <Tooltip
-                        formatter={(value: number, name: string) => [`${value} entities`, name]}
+                        formatter={(value: number | string | undefined, name: string | number | undefined) => [`${Number(value || 0)} entities`, String(name || '')]}
                         contentStyle={{
                           backgroundColor: '#151B28',
                           border: '1px solid #1E293B',
