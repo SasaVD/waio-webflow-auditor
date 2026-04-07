@@ -3,6 +3,7 @@ import { Outlet, Link, useParams, useLocation } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as Collapsible from '@radix-ui/react-collapsible';
 import { useAuditStore } from '../stores/auditStore';
+import { useEnrichmentPolling } from '../hooks/useEnrichmentPolling';
 import {
   LayoutDashboard,
   ArrowLeft,
@@ -27,6 +28,9 @@ import {
   Download,
   Menu,
   X,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import { PILLAR_LABELS } from '../constants/pillarLabels';
 
@@ -91,6 +95,7 @@ export default function DashboardLayout() {
   const { report, isLoading, fetchReport } = useAuditStore();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // Fetch audit data from API if not in memory
   useEffect(() => {
@@ -98,6 +103,18 @@ export default function DashboardLayout() {
       fetchReport(auditId);
     }
   }, [auditId, report, isLoading, fetchReport]);
+
+  // Enrichment polling
+  const enrichment = useEnrichmentPolling(auditId);
+
+  // Auto-dismiss success banner after 4 seconds
+  useEffect(() => {
+    if (enrichment.status === 'complete') {
+      const timer = setTimeout(() => setBannerDismissed(true), 4000);
+      return () => clearTimeout(timer);
+    }
+    setBannerDismissed(false);
+  }, [enrichment.status]);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(navGroups.map((g) => [g.label, true]))
   );
@@ -315,6 +332,68 @@ export default function DashboardLayout() {
 
       {/* Main Content */}
       <div className="flex-1 overflow-auto">
+        {/* Enrichment Banner */}
+        <AnimatePresence>
+          {enrichment.status === 'polling' && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mx-4 mt-4 lg:mx-6 lg:mt-5"
+            >
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-5 py-3.5 flex items-start gap-3">
+                <Loader2 size={18} className="text-indigo-600 animate-spin mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-indigo-900">Report enrichment in progress</p>
+                  <p className="text-xs text-indigo-700 mt-0.5">{enrichment.progress}</p>
+                  <p className="text-xs text-indigo-500 mt-1">
+                    Link graph, topic clusters, and crawl statistics are being generated...
+                  </p>
+                  {/* Indeterminate progress bar */}
+                  <div className="mt-2.5 h-1.5 bg-indigo-100 rounded-full overflow-hidden">
+                    <div className="h-full w-1/3 bg-indigo-500 rounded-full animate-[shimmer_1.5s_ease-in-out_infinite]"
+                      style={{ animation: 'shimmer 1.5s ease-in-out infinite' }} />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+          {enrichment.status === 'complete' && !bannerDismissed && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mx-4 mt-4 lg:mx-6 lg:mt-5"
+            >
+              <div className="bg-green-50 border border-green-200 rounded-xl px-5 py-3.5 flex items-center gap-3">
+                <CheckCircle2 size={18} className="text-green-600 flex-shrink-0" />
+                <p className="text-sm font-semibold text-green-900">
+                  Report enrichment complete! Refreshing data...
+                </p>
+              </div>
+            </motion.div>
+          )}
+          {enrichment.status === 'failed' && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mx-4 mt-4 lg:mx-6 lg:mt-5"
+            >
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3.5 flex items-center gap-3">
+                <AlertTriangle size={18} className="text-amber-600 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-900">
+                    Some premium data couldn't be generated
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    The rest of your report is ready. {enrichment.progress}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
         <Outlet />
       </div>
     </div>

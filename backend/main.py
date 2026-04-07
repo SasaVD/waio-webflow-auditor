@@ -410,11 +410,15 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
                 await dfs_client.close()
                 report["crawl_task_id"] = task_result["task_id"]
                 report["crawl_status"] = "crawling"
+                report["enrichment_status"] = "polling"
+                report["enrichment_progress"] = "Site crawl submitted, waiting for results..."
                 report["max_pages_requested"] = request.max_pages
                 logger.info(f"DataForSEO task submitted: {task_result['task_id']} for {url}")
             except Exception as e:
                 logger.warning(f"DataForSEO task submission failed (non-fatal): {e}")
                 report["crawl_status"] = "unavailable"
+                report["enrichment_status"] = "failed"
+                report["enrichment_progress"] = "Crawl service unavailable"
 
         # ── Phase 3: Persist to database ──
         audit_type = "competitive" if competitive_data else "single"
@@ -528,6 +532,27 @@ async def get_audit_report(audit_id: str):
     return report
 
 
+@app.get("/api/audit/enrichment-status/{audit_id}")
+async def get_enrichment_status(audit_id: str):
+    """Lightweight endpoint to poll enrichment progress.
+    Returns only status fields — no full report fetch."""
+    record = await get_audit_by_id(audit_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    report = record["report_json"]
+    if isinstance(report, str):
+        report = json.loads(report)
+    link_analysis = report.get("link_analysis") or {}
+    has_graph = bool(link_analysis.get("graph", {}).get("nodes"))
+    has_clusters = bool(link_analysis.get("clusters"))
+    return {
+        "enrichment_status": report.get("enrichment_status", "complete"),
+        "enrichment_progress": report.get("enrichment_progress", ""),
+        "has_link_graph": has_graph,
+        "has_topic_clusters": has_clusters,
+    }
+
+
 @app.get("/api/audits")
 async def get_all_audits(
     limit: int = 100, offset: int = 0,
@@ -624,7 +649,20 @@ async def _poll_and_enrich_crawl(task_id: str, audit_id: str):
                 f"progress={crawl_progress} pages={pages_crawled}/{pages_count}"
             )
 
+            # Write progress update so frontend can show what's happening
+            progress_msg = f"Crawling site... {pages_crawled}/{pages_count} pages (poll {attempt}/{max_attempts})"
+            if crawl_progress == "in_progress":
+                progress_msg = f"Crawling site... {pages_crawled}/{pages_count} pages discovered (poll {attempt}/{max_attempts})"
+            await update_audit_report(audit_id, {
+                "enrichment_status": "polling",
+                "enrichment_progress": progress_msg,
+            })
+
             if crawl_progress == "finished":
+                await update_audit_report(audit_id, {
+                    "enrichment_status": "polling",
+                    "enrichment_progress": "Crawl complete. Building link graph and topic clusters...",
+                })
                 await update_dataforseo_task(task_id, status="completed", summary=summary)
                 dfs_client = DataForSEOClient()
                 await _enrich_report_from_crawl(task_id, dfs_client, summary)
@@ -633,10 +671,15 @@ async def _poll_and_enrich_crawl(task_id: str, audit_id: str):
         except Exception as e:
             logger.warning(f"DataForSEO poll error (attempt {attempt}): {e}")
 
+    # Timed out
     logger.warning(
         f"DataForSEO crawl timed out after {max_attempts * 20}s for task {task_id}, "
         f"audit {audit_id}. Results can still arrive via pingback or manual trigger."
     )
+    await update_audit_report(audit_id, {
+        "enrichment_status": "failed",
+        "enrichment_progress": "Crawl timed out. Results may still arrive via webhook.",
+    })
 
 
 @app.get("/api/dataforseo/pingback")
@@ -743,12 +786,14 @@ async def _enrich_report_from_crawl(
             "crawl_status": "completed",
             "crawl_stats": crawl_stats,
             "link_analysis": link_analysis,
+            "enrichment_status": "complete",
+            "enrichment_progress": "Complete",
         }
 
         await update_audit_report(audit_id, report_updates)
         logger.info(
             f"Audit {audit_id} enriched: "
-            f"{len(link_analysis.get('graph_data', {}).get('nodes', []))} graph nodes, "
+            f"{len(link_analysis.get('graph', {}).get('nodes', []))} graph nodes, "
             f"{len(link_analysis.get('clusters', []))} clusters"
         )
 
@@ -771,6 +816,16 @@ async def _enrich_report_from_crawl(
 
     except Exception as e:
         logger.error(f"Report enrichment failed for task {task_id}: {e}", exc_info=True)
+        # Mark enrichment as failed so the frontend stops polling
+        try:
+            task_record = await get_dataforseo_task(task_id)
+            if task_record and task_record.get("audit_id"):
+                await update_audit_report(task_record["audit_id"], {
+                    "enrichment_status": "failed",
+                    "enrichment_progress": "Report enrichment failed. Please try again.",
+                })
+        except Exception:
+            pass
         try:
             await dfs_client.close()
         except Exception:

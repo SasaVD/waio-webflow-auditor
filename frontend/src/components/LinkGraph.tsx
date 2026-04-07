@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import * as d3 from 'd3';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import ForceGraph2D from 'react-force-graph-2d';
+import type { ForceGraphMethods, NodeObject, LinkObject } from 'react-force-graph-2d';
 import { motion } from 'framer-motion';
-import { Network, Maximize2, Minimize2, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import {
+  Network, Maximize2, Minimize2, AlertCircle, Eye, EyeOff,
+  Search, X, Download, GitBranch, Workflow,
+  ExternalLink, Focus, ArrowDownToLine, ArrowUpFromLine,
+} from 'lucide-react';
 
 /* ─── Types ─── */
 
-interface GraphNode extends d3.SimulationNodeDatum {
+interface GraphNode {
   id: string;
   label: string;
   cluster: number;
@@ -14,11 +19,14 @@ interface GraphNode extends d3.SimulationNodeDatum {
   depth: number | null;
   is_orphan: boolean;
   nlp_category?: string | null;
+  // Added at runtime by force-graph
+  x?: number;
+  y?: number;
 }
 
-interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
-  source: string | GraphNode;
-  target: string | GraphNode;
+interface GraphLink {
+  source: string;
+  target: string;
   anchor?: string;
 }
 
@@ -62,38 +70,137 @@ interface LinkGraphProps {
 /* ─── Cluster Color Palette ─── */
 
 const CLUSTER_COLORS = [
-  '#6366F1', // indigo
-  '#22D3EE', // cyan
-  '#F472B6', // pink
-  '#34D399', // emerald
-  '#FBBF24', // amber
-  '#A78BFA', // violet
-  '#FB923C', // orange
-  '#60A5FA', // blue
-  '#4ADE80', // green
-  '#F87171', // red
-  '#818CF8', // periwinkle
-  '#2DD4BF', // teal
+  '#6366F1', '#22D3EE', '#F472B6', '#34D399', '#FBBF24',
+  '#A78BFA', '#FB923C', '#60A5FA', '#4ADE80', '#F87171',
+  '#818CF8', '#2DD4BF',
 ];
 
 const ORPHAN_COLOR = '#EF4444';
-const LINK_COLOR = 'rgba(0,0,0,0.08)';
-const LINK_HIGHLIGHT_COLOR = 'rgba(40,32,255,0.5)';
+const LINK_DEFAULT = 'rgba(148, 163, 184, 0.15)';
+const LINK_HIGHLIGHT = 'rgba(99, 102, 241, 0.6)';
+const BG_COLOR = '#0F172A';
+
+/* ─── Helpers ─── */
+
+function getClusterColor(cluster: number): string {
+  if (cluster < 0) return '#64748B';
+  return CLUSTER_COLORS[cluster % CLUSTER_COLORS.length];
+}
+
+function getNodeSize(node: GraphNode, homepageId: string | null): number {
+  if (node.id === homepageId) return 10;
+  if (node.is_orphan) return 5;
+  const base = 3;
+  return Math.min(base + Math.sqrt(node.inbound || 0) * 1.2, 14);
+}
+
+function truncateUrl(url: string, maxLen = 30): string {
+  try {
+    const u = new URL(url);
+    const path = u.pathname;
+    if (path.length <= maxLen) return path || '/';
+    return '...' + path.slice(-maxLen + 3);
+  } catch {
+    return url.length > maxLen ? '...' + url.slice(-maxLen + 3) : url;
+  }
+}
 
 /* ─── Component ─── */
 
 export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
-  const svgRef = useRef<SVGSVGElement>(null);
+  const graphRef = useRef<ForceGraphMethods<NodeObject<GraphNode>, LinkObject<GraphNode, GraphLink>>>();
   const containerRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [showOrphans, setShowOrphans] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [loading, setLoading] = useState(!data);
   const [graphData, setGraphData] = useState<LinkGraphData | null>(data || null);
   const [error, setError] = useState<string | null>(null);
-  const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null);
+  const [highlightNodes, setHighlightNodes] = useState<Set<string>>(new Set());
+  const [highlightLinks, setHighlightLinks] = useState<Set<string>>(new Set());
+  const [containerWidth, setContainerWidth] = useState(800);
+
+  // Search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchMatches, setSearchMatches] = useState<Set<string>>(new Set());
+
+  // Layout mode
+  const [layoutMode, setLayoutMode] = useState<'force' | 'tree'>('force');
+
+  // Filters
+  const [filterMode, setFilterMode] = useState<'all' | 'orphans' | 'hubs' | 'depth'>('all');
+
+  // Context menu
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: GraphNode } | null>(null);
 
   const apiBase = import.meta.env.PROD ? '' : 'http://127.0.0.1:8000';
+  const graphHeight = expanded ? 700 : 480;
+
+  // Find homepage node
+  const homepageId = useMemo(() => {
+    if (!graphData) return null;
+    const nodes = graphData.graph.nodes;
+    // Homepage is typically the node with the most inbound links at depth 0
+    const root = nodes.find(n => {
+      try {
+        const u = new URL(n.id);
+        return u.pathname === '/' || u.pathname === '';
+      } catch { return false; }
+    });
+    return root?.id ?? null;
+  }, [graphData]);
+
+  // Compute real stats from graph data
+  const computedStats = useMemo(() => {
+    if (!graphData) return null;
+    const nodes = graphData.graph.nodes;
+    const links = graphData.graph.links;
+
+    // BFS to compute depths from homepage
+    const depths = new Map<string, number>();
+    if (homepageId) {
+      const adj = new Map<string, string[]>();
+      for (const link of links) {
+        const src = typeof link.source === 'object' ? (link.source as GraphNode).id : link.source;
+        const tgt = typeof link.target === 'object' ? (link.target as GraphNode).id : link.target;
+        if (!adj.has(src)) adj.set(src, []);
+        adj.get(src)!.push(tgt);
+      }
+      const queue = [homepageId];
+      depths.set(homepageId, 0);
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        const d = depths.get(current)!;
+        for (const neighbor of adj.get(current) ?? []) {
+          if (!depths.has(neighbor)) {
+            depths.set(neighbor, d + 1);
+            queue.push(neighbor);
+          }
+        }
+      }
+    }
+
+    // Compute inDegree for orphan detection
+    const inDegree = new Map<string, number>();
+    for (const node of nodes) inDegree.set(node.id, 0);
+    for (const link of links) {
+      const tgt = typeof link.target === 'object' ? (link.target as GraphNode).id : link.target;
+      inDegree.set(tgt, (inDegree.get(tgt) ?? 0) + 1);
+    }
+
+    const orphanCount = [...inDegree.entries()].filter(
+      ([id, deg]) => deg === 0 && id !== homepageId
+    ).length;
+    const maxDepth = depths.size > 0 ? Math.max(...depths.values()) : graphData.stats.max_depth;
+
+    return {
+      maxDepth,
+      orphanCount,
+      depths,
+      inDegree,
+    };
+  }, [graphData, homepageId]);
 
   // Fetch graph data if not provided as prop
   useEffect(() => {
@@ -124,196 +231,291 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
     fetchData();
   }, [auditId, data, apiBase]);
 
-  const getNodeColor = useCallback((node: GraphNode): string => {
-    if (node.is_orphan) return ORPHAN_COLOR;
-    if (node.cluster >= 0 && node.cluster < CLUSTER_COLORS.length) {
-      return CLUSTER_COLORS[node.cluster];
-    }
-    return CLUSTER_COLORS[Math.abs(node.cluster) % CLUSTER_COLORS.length];
-  }, []);
-
-  const getNodeRadius = useCallback((node: GraphNode): number => {
-    const base = 3;
-    const inbound = node.inbound || 0;
-    return Math.min(base + Math.sqrt(inbound) * 1.5, 20);
-  }, []);
-
-  // D3 force simulation
+  // Measure container width
   useEffect(() => {
-    if (!graphData || !svgRef.current || !containerRef.current) return;
-
-    const svg = d3.select(svgRef.current);
-    svg.selectAll('*').remove();
-
-    const container = containerRef.current;
-    const width = container.clientWidth;
-    const height = expanded ? 700 : 450;
-
-    svg.attr('width', width).attr('height', height);
-
-    // Level of detail: for large graphs, show top nodes by inbound + all orphans
-    let displayNodes = graphData.graph.nodes;
-    let displayLinks = graphData.graph.links;
-    const MAX_DISPLAY_NODES = 300;
-
-    if (displayNodes.length > MAX_DISPLAY_NODES) {
-      const orphanNodes = displayNodes.filter(n => n.is_orphan && showOrphans);
-      const nonOrphanNodes = displayNodes
-        .filter(n => !n.is_orphan)
-        .sort((a, b) => (b.inbound || 0) - (a.inbound || 0))
-        .slice(0, MAX_DISPLAY_NODES - orphanNodes.length);
-      displayNodes = [...nonOrphanNodes, ...orphanNodes];
-      const nodeIds = new Set(displayNodes.map(n => n.id));
-      displayLinks = displayLinks.filter(l => {
-        const sourceId = typeof l.source === 'string' ? l.source : l.source.id;
-        const targetId = typeof l.target === 'string' ? l.target : l.target.id;
-        return nodeIds.has(sourceId) && nodeIds.has(targetId);
-      });
-    }
-
-    if (!showOrphans) {
-      displayNodes = displayNodes.filter(n => !n.is_orphan);
-      const nodeIds = new Set(displayNodes.map(n => n.id));
-      displayLinks = displayLinks.filter(l => {
-        const sourceId = typeof l.source === 'string' ? l.source : l.source.id;
-        const targetId = typeof l.target === 'string' ? l.target : l.target.id;
-        return nodeIds.has(sourceId) && nodeIds.has(targetId);
-      });
-    }
-
-    // Clone data for D3 mutation
-    const nodes: GraphNode[] = displayNodes.map(d => ({ ...d }));
-    const links: GraphLink[] = displayLinks.map(d => ({ ...d }));
-
-    // Zoom behavior
-    const g = svg.append('g');
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 8])
-      .on('zoom', (event) => {
-        g.attr('transform', event.transform);
-      });
-    svg.call(zoom);
-
-    // Links
-    const linkSelection = g.append('g')
-      .selectAll<SVGLineElement, GraphLink>('line')
-      .data(links)
-      .join('line')
-      .attr('stroke', LINK_COLOR)
-      .attr('stroke-width', 0.5);
-
-    // Nodes
-    const nodeSelection = g.append('g')
-      .selectAll<SVGCircleElement, GraphNode>('circle')
-      .data(nodes)
-      .join('circle')
-      .attr('r', d => getNodeRadius(d))
-      .attr('fill', d => getNodeColor(d))
-      .attr('stroke', d => d.is_orphan ? ORPHAN_COLOR : 'rgba(0,0,0,0.12)')
-      .attr('stroke-width', d => d.is_orphan ? 2 : 0.5)
-      .attr('opacity', 0.85)
-      .style('cursor', 'pointer');
-
-    // Hover interactions
-    nodeSelection
-      .on('mouseenter', (_event, d) => {
-        setHoveredNode(d);
-        // Highlight connected links
-        linkSelection
-          .attr('stroke', l => {
-            const sId = typeof l.source === 'object' ? l.source.id : l.source;
-            const tId = typeof l.target === 'object' ? l.target.id : l.target;
-            return sId === d.id || tId === d.id ? LINK_HIGHLIGHT_COLOR : LINK_COLOR;
-          })
-          .attr('stroke-width', l => {
-            const sId = typeof l.source === 'object' ? l.source.id : l.source;
-            const tId = typeof l.target === 'object' ? l.target.id : l.target;
-            return sId === d.id || tId === d.id ? 1.5 : 0.5;
-          });
-        nodeSelection.attr('opacity', n =>
-          n.id === d.id ? 1 : 0.3
-        );
-        // Re-highlight connected nodes
-        const connectedIds = new Set<string>();
-        links.forEach(l => {
-          const sId = typeof l.source === 'object' ? l.source.id : l.source;
-          const tId = typeof l.target === 'object' ? l.target.id : l.target;
-          if (sId === d.id) connectedIds.add(tId as string);
-          if (tId === d.id) connectedIds.add(sId as string);
-        });
-        nodeSelection.attr('opacity', n =>
-          n.id === d.id || connectedIds.has(n.id) ? 1 : 0.2
-        );
-      })
-      .on('mouseleave', () => {
-        setHoveredNode(null);
-        linkSelection.attr('stroke', LINK_COLOR).attr('stroke-width', 0.5);
-        nodeSelection.attr('opacity', 0.85);
-      });
-
-    // Drag behavior
-    const drag = d3.drag<SVGCircleElement, GraphNode>()
-      .on('start', (event, d) => {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
-      })
-      .on('drag', (event, d) => {
-        d.fx = event.x;
-        d.fy = event.y;
-      })
-      .on('end', (event, d) => {
-        if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
-      });
-    nodeSelection.call(drag);
-
-    // Force simulation
-    const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink<GraphNode, GraphLink>(links)
-        .id(d => d.id)
-        .distance(40)
-        .strength(0.3))
-      .force('charge', d3.forceManyBody().strength(-30).distanceMax(200))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide<GraphNode>().radius(d => getNodeRadius(d) + 2))
-      .on('tick', () => {
-        linkSelection
-          .attr('x1', d => (d.source as GraphNode).x!)
-          .attr('y1', d => (d.source as GraphNode).y!)
-          .attr('x2', d => (d.target as GraphNode).x!)
-          .attr('y2', d => (d.target as GraphNode).y!);
-        nodeSelection
-          .attr('cx', d => d.x!)
-          .attr('cy', d => d.y!);
-      });
-
-    simulationRef.current = simulation;
-
-    // Initial zoom to fit
-    setTimeout(() => {
-      const bounds = g.node()?.getBBox();
-      if (bounds && bounds.width > 0 && bounds.height > 0) {
-        const padding = 40;
-        const scale = Math.min(
-          (width - padding * 2) / bounds.width,
-          (height - padding * 2) / bounds.height,
-          1.5
-        );
-        const tx = width / 2 - (bounds.x + bounds.width / 2) * scale;
-        const ty = height / 2 - (bounds.y + bounds.height / 2) * scale;
-        svg.transition().duration(500).call(
-          zoom.transform,
-          d3.zoomIdentity.translate(tx, ty).scale(scale)
-        );
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
       }
-    }, 2000);
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
-    return () => {
-      simulation.stop();
-    };
-  }, [graphData, expanded, showOrphans, getNodeColor, getNodeRadius]);
+  // Zoom to fit after initial render
+  useEffect(() => {
+    if (!graphRef.current || !graphData) return;
+    const timer = setTimeout(() => {
+      graphRef.current?.zoomToFit(500, 60);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [graphData, layoutMode]);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handler = () => setContextMenu(null);
+    window.addEventListener('click', handler);
+    return () => window.removeEventListener('click', handler);
+  }, []);
+
+  // Search handler
+  useEffect(() => {
+    if (!searchQuery.trim() || !graphData) {
+      setSearchMatches(new Set());
+      return;
+    }
+    const q = searchQuery.toLowerCase();
+    const matches = new Set<string>();
+    for (const node of graphData.graph.nodes) {
+      if (node.id.toLowerCase().includes(q) || node.label.toLowerCase().includes(q)) {
+        matches.add(node.id);
+      }
+    }
+    setSearchMatches(matches);
+  }, [searchQuery, graphData]);
+
+  // Memoize filtered graph data
+  const filteredGraphData = useMemo(() => {
+    if (!graphData) return { nodes: [] as GraphNode[], links: [] as GraphLink[] };
+
+    let nodes = graphData.graph.nodes;
+    let links = graphData.graph.links;
+
+    // Apply orphan filter
+    if (!showOrphans) {
+      nodes = nodes.filter(n => !n.is_orphan);
+    }
+
+    // Apply filter mode
+    if (filterMode === 'orphans') {
+      nodes = nodes.filter(n => n.is_orphan || (computedStats?.inDegree.get(n.id) ?? 1) === 0);
+    } else if (filterMode === 'hubs') {
+      nodes = nodes.filter(n => n.inbound > 10);
+    }
+
+    // Filter links to match visible nodes
+    const nodeIds = new Set(nodes.map(n => n.id));
+    links = links.filter(l => {
+      const src = typeof l.source === 'object' ? (l.source as GraphNode).id : l.source;
+      const tgt = typeof l.target === 'object' ? (l.target as GraphNode).id : l.target;
+      return nodeIds.has(src) && nodeIds.has(tgt);
+    });
+
+    return { nodes, links };
+  }, [graphData, showOrphans, filterMode, computedStats]);
+
+  // Hover handling
+  const handleNodeHover = useCallback((node: NodeObject<GraphNode> | null) => {
+    if (!graphData) return;
+    const newHighlightNodes = new Set<string>();
+    const newHighlightLinks = new Set<string>();
+
+    if (node) {
+      setHoveredNode(node as GraphNode);
+      newHighlightNodes.add(node.id!);
+      for (const link of graphData.graph.links) {
+        const src = typeof link.source === 'object' ? (link.source as GraphNode).id : link.source;
+        const tgt = typeof link.target === 'object' ? (link.target as GraphNode).id : link.target;
+        if (src === node.id || tgt === node.id) {
+          newHighlightLinks.add(`${src}->${tgt}`);
+          newHighlightNodes.add(src);
+          newHighlightNodes.add(tgt);
+        }
+      }
+    } else {
+      setHoveredNode(null);
+    }
+    setHighlightNodes(newHighlightNodes);
+    setHighlightLinks(newHighlightLinks);
+  }, [graphData]);
+
+  // Click handler
+  const handleNodeClick = useCallback((node: NodeObject<GraphNode>) => {
+    setSelectedNode(prev => prev?.id === node.id ? null : node as GraphNode);
+  }, []);
+
+  // Right-click handler
+  const handleNodeRightClick = useCallback((node: NodeObject<GraphNode>, event: MouseEvent) => {
+    event.preventDefault();
+    setContextMenu({ x: event.clientX, y: event.clientY, node: node as GraphNode });
+  }, []);
+
+  // Context menu actions
+  const focusNode = useCallback((nodeId: string) => {
+    if (!graphRef.current || !graphData) return;
+    const node = graphData.graph.nodes.find(n => n.id === nodeId);
+    if (node && node.x != null && node.y != null) {
+      graphRef.current.centerAt(node.x, node.y, 500);
+      graphRef.current.zoom(4, 500);
+    }
+    setContextMenu(null);
+  }, [graphData]);
+
+  const highlightConnected = useCallback((nodeId: string, direction: 'in' | 'out') => {
+    if (!graphData) return;
+    const newNodes = new Set<string>([nodeId]);
+    const newLinks = new Set<string>();
+    for (const link of graphData.graph.links) {
+      const src = typeof link.source === 'object' ? (link.source as GraphNode).id : link.source;
+      const tgt = typeof link.target === 'object' ? (link.target as GraphNode).id : link.target;
+      if (direction === 'in' && tgt === nodeId) {
+        newNodes.add(src);
+        newLinks.add(`${src}->${tgt}`);
+      } else if (direction === 'out' && src === nodeId) {
+        newNodes.add(tgt);
+        newLinks.add(`${src}->${tgt}`);
+      }
+    }
+    setHighlightNodes(newNodes);
+    setHighlightLinks(newLinks);
+    setContextMenu(null);
+  }, [graphData]);
+
+  // Search: navigate to matched node
+  const navigateToSearchResult = useCallback(() => {
+    if (!graphRef.current || searchMatches.size === 0 || !graphData) return;
+    const firstMatch = graphData.graph.nodes.find(n => searchMatches.has(n.id));
+    if (firstMatch && firstMatch.x != null && firstMatch.y != null) {
+      graphRef.current.centerAt(firstMatch.x, firstMatch.y, 500);
+      graphRef.current.zoom(3, 500);
+    }
+  }, [searchMatches, graphData]);
+
+  // Export as PNG
+  const exportPNG = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const canvas = container.querySelector('canvas');
+    if (!canvas) return;
+    const url = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `link-graph-${auditId}.png`;
+    a.click();
+  }, [auditId]);
+
+  // Custom node rendering with zoom-aware LOD
+  const nodeCanvasObject = useCallback((node: NodeObject<GraphNode>, ctx: CanvasRenderingContext2D, globalScale: number) => {
+    const n = node as GraphNode;
+    const size = getNodeSize(n, homepageId);
+    const x = node.x ?? 0;
+    const y = node.y ?? 0;
+
+    // Determine node color
+    let color: string;
+    if (n.is_orphan) {
+      color = ORPHAN_COLOR;
+    } else if (filterMode === 'depth' && computedStats?.depths) {
+      const depth = computedStats.depths.get(n.id) ?? 0;
+      const maxD = Math.max(computedStats.maxDepth, 1);
+      const t = depth / maxD;
+      // Dark (shallow) to light (deep)
+      const r = Math.round(99 + t * 100);
+      const g = Math.round(102 + t * 100);
+      const b = Math.round(241 - t * 100);
+      color = `rgb(${r},${g},${b})`;
+    } else {
+      color = getClusterColor(n.cluster);
+    }
+
+    // Search highlighting
+    const isSearchMatch = searchMatches.size > 0 && searchMatches.has(n.id);
+    const isSearchDimmed = searchMatches.size > 0 && !isSearchMatch;
+    const isHighlighted = highlightNodes.size > 0 && highlightNodes.has(n.id);
+    const isDimmed = (highlightNodes.size > 0 && !isHighlighted) || isSearchDimmed;
+
+    ctx.globalAlpha = isDimmed ? 0.15 : 1;
+
+    // LOD rendering
+    if (globalScale < 0.5) {
+      // Ultra-zoomed out: simple dots
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(size * 0.5, 1.5), 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+    } else if (globalScale < 1.5) {
+      // Medium zoom: colored circles with borders for hubs
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+      if (n.inbound > 10 || n.id === homepageId) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+        ctx.lineWidth = 1.5 / globalScale;
+        ctx.stroke();
+      }
+      if (n.is_orphan) {
+        ctx.strokeStyle = ORPHAN_COLOR;
+        ctx.lineWidth = 2 / globalScale;
+        ctx.stroke();
+      }
+    } else {
+      // Zoomed in: full detail with labels
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+
+      if (n.inbound > 10 || n.id === homepageId) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 1.5 / globalScale;
+        ctx.stroke();
+      }
+      if (n.is_orphan) {
+        ctx.strokeStyle = ORPHAN_COLOR;
+        ctx.lineWidth = 2 / globalScale;
+        ctx.stroke();
+      }
+
+      // Label
+      const label = truncateUrl(n.id);
+      const fontSize = Math.max(10 / globalScale, 2);
+      ctx.font = `${fontSize}px Inter, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillText(label, x, y + size + 2 / globalScale);
+    }
+
+    // Search match pulse
+    if (isSearchMatch) {
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath();
+      ctx.arc(x, y, size + 4 / globalScale, 0, 2 * Math.PI);
+      ctx.strokeStyle = '#FBBF24';
+      ctx.lineWidth = 2 / globalScale;
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = 1;
+  }, [homepageId, highlightNodes, searchMatches, filterMode, computedStats]);
+
+  // Pointer area for click detection
+  const nodePointerAreaPaint = useCallback((node: NodeObject<GraphNode>, paintColor: string, ctx: CanvasRenderingContext2D) => {
+    const n = node as GraphNode;
+    const size = getNodeSize(n, homepageId) + 3;
+    ctx.beginPath();
+    ctx.arc(node.x ?? 0, node.y ?? 0, size, 0, 2 * Math.PI);
+    ctx.fillStyle = paintColor;
+    ctx.fill();
+  }, [homepageId]);
+
+  // Link color based on highlight state
+  const linkColor = useCallback((link: LinkObject<GraphNode, GraphLink>) => {
+    const src = typeof link.source === 'object' ? (link.source as GraphNode).id : link.source;
+    const tgt = typeof link.target === 'object' ? (link.target as GraphNode).id : link.target;
+    const key = `${src}->${tgt}`;
+    if (highlightLinks.has(key)) return LINK_HIGHLIGHT;
+    return LINK_DEFAULT;
+  }, [highlightLinks]);
+
+  const linkWidth = useCallback((link: LinkObject<GraphNode, GraphLink>) => {
+    const src = typeof link.source === 'object' ? (link.source as GraphNode).id : link.source;
+    const tgt = typeof link.target === 'object' ? (link.target as GraphNode).id : link.target;
+    const key = `${src}->${tgt}`;
+    return highlightLinks.has(key) ? 1.5 : 0.3;
+  }, [highlightLinks]);
 
   if (loading) {
     return (
@@ -345,17 +547,18 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
   if (!graphData || graphData.graph.nodes.length === 0) return null;
 
   const stats = graphData.stats;
-  const orphanCount = graphData.orphans.orphan_count;
+  const orphanCount = computedStats?.orphanCount ?? graphData.orphans.orphan_count;
+  const maxDepth = computedStats?.maxDepth ?? stats.max_depth;
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.13 }}
-      className="rounded-2xl overflow-hidden mb-4"
+      className="rounded-2xl overflow-hidden mb-4 border border-border"
     >
       {/* Header */}
-      <div className="bg-surface-raised border-b border-border px-6 py-4 flex items-center justify-between">
+      <div className="bg-surface-raised border-b border-border px-5 py-3.5 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-accent-muted flex items-center justify-center">
             <Network size={16} className="text-accent" />
@@ -365,70 +568,262 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
             <p className="text-xs text-text-muted">
               {stats.total_pages} pages &middot; {stats.total_internal_links} internal links
               {orphanCount > 0 && (
-                <span className="text-severity-critical ml-2">&middot; {orphanCount} orphan pages</span>
+                <span className="text-red-500 ml-2">&middot; {orphanCount} orphans</span>
               )}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Search */}
+          <div className="relative">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && navigateToSearchResult()}
+              placeholder="Search URL..."
+              className="pl-7 pr-7 py-1.5 w-44 rounded-lg bg-surface-overlay border border-border text-xs text-text placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          {/* Layout toggle */}
+          <div className="flex rounded-lg overflow-hidden border border-border">
+            <button
+              onClick={() => setLayoutMode('force')}
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs transition-colors ${
+                layoutMode === 'force'
+                  ? 'bg-accent text-white'
+                  : 'bg-surface-overlay text-text-secondary hover:text-text'
+              }`}
+              title="Force-directed layout"
+            >
+              <Workflow size={11} />
+              Force
+            </button>
+            <button
+              onClick={() => setLayoutMode('tree')}
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs transition-colors ${
+                layoutMode === 'tree'
+                  ? 'bg-accent text-white'
+                  : 'bg-surface-overlay text-text-secondary hover:text-text'
+              }`}
+              title="Hierarchical tree layout"
+            >
+              <GitBranch size={11} />
+              Tree
+            </button>
+          </div>
+
+          {/* Filter toggles */}
+          <div className="flex rounded-lg overflow-hidden border border-border">
+            {(['all', 'orphans', 'hubs', 'depth'] as const).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setFilterMode(mode === filterMode ? 'all' : mode)}
+                className={`px-2.5 py-1.5 text-xs capitalize transition-colors ${
+                  filterMode === mode
+                    ? 'bg-accent text-white'
+                    : 'bg-surface-overlay text-text-secondary hover:text-text'
+                }`}
+              >
+                {mode === 'all' ? 'All' : mode === 'orphans' ? 'Orphans' : mode === 'hubs' ? 'Hubs' : 'Depth'}
+              </button>
+            ))}
+          </div>
+
           <button
             onClick={() => setShowOrphans(!showOrphans)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-border text-xs text-text-secondary transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-overlay border border-border hover:bg-border text-xs text-text-secondary transition-colors"
             title={showOrphans ? 'Hide orphan pages' : 'Show orphan pages'}
           >
-            {showOrphans ? <EyeOff size={12} /> : <Eye size={12} />}
-            Orphans
+            {showOrphans ? <EyeOff size={11} /> : <Eye size={11} />}
+          </button>
+          <button
+            onClick={exportPNG}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-overlay border border-border hover:bg-border text-xs text-text-secondary transition-colors"
+            title="Export as PNG"
+          >
+            <Download size={11} />
           </button>
           <button
             onClick={() => setExpanded(!expanded)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-border text-xs text-text-secondary transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-overlay border border-border hover:bg-border text-xs text-text-secondary transition-colors"
           >
-            {expanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-            {expanded ? 'Collapse' : 'Expand'}
+            {expanded ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
           </button>
         </div>
       </div>
 
-      {/* Graph Canvas — intentionally dark for data visualization contrast */}
+      {/* Graph Canvas */}
       <div
         ref={containerRef}
-        className="relative bg-[#0F172A]"
-        style={{ height: expanded ? 700 : 450 }}
+        className="relative"
+        style={{ height: graphHeight, backgroundColor: BG_COLOR }}
+        onContextMenu={e => e.preventDefault()}
       >
-        <svg ref={svgRef} className="w-full h-full" />
+        <ForceGraph2D
+          ref={graphRef}
+          graphData={filteredGraphData}
+          width={containerWidth}
+          height={graphHeight}
+          backgroundColor={BG_COLOR}
+          // Performance
+          warmupTicks={100}
+          cooldownTicks={200}
+          d3AlphaDecay={0.05}
+          autoPauseRedraw={true}
+          // Layout
+          dagMode={layoutMode === 'tree' ? 'td' : undefined}
+          dagLevelDistance={layoutMode === 'tree' ? 50 : undefined}
+          // Node rendering
+          nodeCanvasObject={nodeCanvasObject}
+          nodeCanvasObjectMode={() => 'replace'}
+          nodePointerAreaPaint={nodePointerAreaPaint}
+          // Link rendering
+          linkColor={linkColor}
+          linkWidth={linkWidth}
+          linkDirectionalArrowLength={4}
+          linkDirectionalArrowRelPos={1}
+          linkDirectionalArrowColor={linkColor}
+          // Interaction
+          onNodeHover={handleNodeHover}
+          onNodeClick={handleNodeClick}
+          onNodeRightClick={handleNodeRightClick}
+          onBackgroundClick={() => {
+            setSelectedNode(null);
+            setHighlightNodes(new Set());
+            setHighlightLinks(new Set());
+          }}
+          enableNodeDrag={true}
+        />
 
-        {/* Tooltip */}
-        {hoveredNode && (
-          <div className="absolute top-4 right-4 bg-white/95 backdrop-blur border border-border rounded-xl p-4 max-w-xs pointer-events-none z-10 shadow-card-hover">
-            <div className="text-xs font-bold text-text truncate mb-2">{hoveredNode.label}</div>
-            <div className="text-[10px] text-text-muted truncate mb-3">{hoveredNode.id}</div>
+        {/* Hover Tooltip */}
+        {hoveredNode && !selectedNode && (
+          <div className="absolute top-4 right-4 bg-white/95 backdrop-blur border border-gray-200 rounded-xl p-4 max-w-xs pointer-events-none z-10 shadow-lg">
+            <div className="text-xs font-bold text-gray-900 truncate mb-1">{hoveredNode.label}</div>
+            <div className="text-[10px] text-gray-500 truncate mb-3">{hoveredNode.id}</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
-              <span className="text-text-muted">Inbound:</span>
-              <span className="text-text font-medium">{hoveredNode.inbound}</span>
-              <span className="text-text-muted">Outbound:</span>
-              <span className="text-text font-medium">{hoveredNode.outbound}</span>
-              <span className="text-text-muted">Click depth:</span>
-              <span className="text-text font-medium">{hoveredNode.depth ?? 'N/A'}</span>
+              <span className="text-gray-500">Inbound:</span>
+              <span className="text-gray-900 font-medium">{hoveredNode.inbound}</span>
+              <span className="text-gray-500">Outbound:</span>
+              <span className="text-gray-900 font-medium">{hoveredNode.outbound}</span>
+              <span className="text-gray-500">Depth:</span>
+              <span className="text-gray-900 font-medium">
+                {computedStats?.depths.get(hoveredNode.id) ?? hoveredNode.depth ?? 'N/A'}
+              </span>
               {hoveredNode.is_orphan && (
                 <>
-                  <span className="text-severity-critical">Status:</span>
-                  <span className="text-severity-critical font-medium">Orphan page</span>
+                  <span className="text-red-500">Status:</span>
+                  <span className="text-red-500 font-medium">Orphan</span>
                 </>
               )}
               {hoveredNode.nlp_category && (
                 <>
-                  <span className="text-text-muted">Category:</span>
-                  <span className="text-text font-medium truncate">{hoveredNode.nlp_category}</span>
+                  <span className="text-gray-500">Category:</span>
+                  <span className="text-gray-900 font-medium truncate">{hoveredNode.nlp_category}</span>
                 </>
               )}
+              <span className="text-gray-500">Cluster:</span>
+              <span className="text-gray-900 font-medium">
+                {graphData.clusters[hoveredNode.cluster]?.prefix ?? `#${hoveredNode.cluster}`}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Selected Node Detail Panel */}
+        {selectedNode && (
+          <div className="absolute top-4 right-4 bg-white border border-gray-200 rounded-xl p-4 w-72 z-20 shadow-xl max-h-80 overflow-y-auto">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-gray-900 truncate flex-1 mr-2">{selectedNode.label}</span>
+              <button
+                onClick={() => setSelectedNode(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <a
+              href={selectedNode.id}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] text-indigo-600 hover:underline flex items-center gap-1 mb-3 truncate"
+            >
+              {selectedNode.id} <ExternalLink size={10} />
+            </a>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="bg-gray-50 rounded-lg p-2 text-center">
+                <div className="text-sm font-bold text-gray-900">{selectedNode.inbound}</div>
+                <div className="text-[9px] text-gray-500 uppercase">In</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-2 text-center">
+                <div className="text-sm font-bold text-gray-900">{selectedNode.outbound}</div>
+                <div className="text-[9px] text-gray-500 uppercase">Out</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-2 text-center">
+                <div className="text-sm font-bold text-gray-900">
+                  {computedStats?.depths.get(selectedNode.id) ?? selectedNode.depth ?? '?'}
+                </div>
+                <div className="text-[9px] text-gray-500 uppercase">Depth</div>
+              </div>
+            </div>
+            {selectedNode.is_orphan && (
+              <div className="bg-red-50 text-red-700 text-[10px] font-medium rounded-lg px-2.5 py-1.5 mb-3">
+                Orphan page — no inbound internal links
+              </div>
+            )}
+            {/* Inbound links */}
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+              Inbound Links ({selectedNode.inbound})
+            </div>
+            <div className="space-y-0.5 mb-3 max-h-24 overflow-y-auto">
+              {graphData.graph.links
+                .filter(l => {
+                  const tgt = typeof l.target === 'object' ? (l.target as GraphNode).id : l.target;
+                  return tgt === selectedNode.id;
+                })
+                .slice(0, 20)
+                .map((l, i) => {
+                  const src = typeof l.source === 'object' ? (l.source as GraphNode).id : l.source;
+                  return (
+                    <div key={i} className="text-[10px] text-gray-600 truncate">{truncateUrl(src as string, 50)}</div>
+                  );
+                })}
+            </div>
+            {/* Outbound links */}
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+              Outbound Links ({selectedNode.outbound})
+            </div>
+            <div className="space-y-0.5 max-h-24 overflow-y-auto">
+              {graphData.graph.links
+                .filter(l => {
+                  const src = typeof l.source === 'object' ? (l.source as GraphNode).id : l.source;
+                  return src === selectedNode.id;
+                })
+                .slice(0, 20)
+                .map((l, i) => {
+                  const tgt = typeof l.target === 'object' ? (l.target as GraphNode).id : l.target;
+                  return (
+                    <div key={i} className="text-[10px] text-gray-600 truncate">{truncateUrl(tgt as string, 50)}</div>
+                  );
+                })}
             </div>
           </div>
         )}
 
         {/* Cluster Legend */}
-        {graphData.clusters.length > 0 && (
-          <div className="absolute bottom-4 left-4 bg-white/95 backdrop-blur border border-border rounded-xl p-3 max-w-xs max-h-40 overflow-y-auto z-10 shadow-card">
-            <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider mb-2">Clusters</div>
+        {graphData.clusters.length > 0 && filterMode !== 'depth' && (
+          <div className="absolute bottom-4 left-4 bg-white/95 backdrop-blur border border-gray-200 rounded-xl p-3 max-w-xs max-h-40 overflow-y-auto z-10 shadow-md">
+            <div className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider mb-2">Clusters</div>
             <div className="space-y-1">
               {graphData.clusters.slice(0, 8).map((cluster, i) => (
                 <div key={cluster.prefix} className="flex items-center gap-2 text-[11px]">
@@ -436,18 +831,73 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
                     className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                     style={{ backgroundColor: CLUSTER_COLORS[i % CLUSTER_COLORS.length] }}
                   />
-                  <span className="text-text-secondary truncate">{cluster.prefix}</span>
-                  <span className="text-text-muted ml-auto">{cluster.page_count}</span>
+                  <span className="text-gray-600 truncate">{cluster.prefix}</span>
+                  <span className="text-gray-400 ml-auto">{cluster.page_count}</span>
                 </div>
               ))}
               {orphanCount > 0 && (
                 <div className="flex items-center gap-2 text-[11px]">
-                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-red-500" style={{ backgroundColor: 'transparent' }} />
-                  <span className="text-severity-critical">Orphan pages</span>
-                  <span className="text-text-muted ml-auto">{orphanCount}</span>
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 border-2 border-red-500" />
+                  <span className="text-red-500">Orphan pages</span>
+                  <span className="text-gray-400 ml-auto">{orphanCount}</span>
                 </div>
               )}
             </div>
+          </div>
+        )}
+        {filterMode === 'depth' && (
+          <div className="absolute bottom-4 left-4 bg-white/95 backdrop-blur border border-gray-200 rounded-xl p-3 z-10 shadow-md">
+            <div className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider mb-2">Depth</div>
+            <div className="flex items-center gap-2">
+              <div className="w-24 h-2 rounded-full" style={{
+                background: 'linear-gradient(to right, #6366F1, #C4B5FD, #F87171)',
+              }} />
+              <div className="flex justify-between w-24">
+                <span className="text-[9px] text-gray-500">0</span>
+                <span className="text-[9px] text-gray-500">{maxDepth}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Search results indicator */}
+        {searchQuery && searchMatches.size > 0 && (
+          <div className="absolute top-4 left-4 bg-amber-100 border border-amber-300 rounded-lg px-3 py-1.5 z-10 text-[11px] text-amber-800 font-medium">
+            {searchMatches.size} match{searchMatches.size !== 1 ? 'es' : ''} — press Enter to focus
+          </div>
+        )}
+
+        {/* Context Menu */}
+        {contextMenu && (
+          <div
+            className="fixed bg-white border border-gray-200 rounded-xl shadow-xl py-1 z-50 min-w-[180px]"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => { window.open(contextMenu.node.id, '_blank'); setContextMenu(null); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              <ExternalLink size={12} /> Open URL
+            </button>
+            <button
+              onClick={() => highlightConnected(contextMenu.node.id, 'in')}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              <ArrowDownToLine size={12} /> Show inbound links
+            </button>
+            <button
+              onClick={() => highlightConnected(contextMenu.node.id, 'out')}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              <ArrowUpFromLine size={12} /> Show outbound links
+            </button>
+            <button
+              onClick={() => focusNode(contextMenu.node.id)}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              <Focus size={12} /> Focus here
+            </button>
           </div>
         )}
       </div>
@@ -463,11 +913,11 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
           <div className="text-[10px] text-text-muted uppercase tracking-wider">Avg Links</div>
         </div>
         <div>
-          <div className="text-lg font-bold text-text">{stats.max_depth}</div>
+          <div className="text-lg font-bold text-text">{maxDepth}</div>
           <div className="text-[10px] text-text-muted uppercase tracking-wider">Max Depth</div>
         </div>
         <div>
-          <div className={`text-lg font-bold ${orphanCount > 0 ? 'text-severity-critical' : 'text-text'}`}>{orphanCount}</div>
+          <div className={`text-lg font-bold ${orphanCount > 0 ? 'text-red-500' : 'text-text'}`}>{orphanCount}</div>
           <div className="text-[10px] text-text-muted uppercase tracking-wider">Orphans</div>
         </div>
         <div>

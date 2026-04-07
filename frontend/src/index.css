@@ -165,6 +165,11 @@ body {
  * Radix Collapsible Animations
  * ============================================ */
 
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
 @keyframes slideDown {
   from { height: 0; opacity: 0; }
   to { height: var(--radix-collapsible-content-height); opacity: 1; }
