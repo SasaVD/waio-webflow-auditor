@@ -129,6 +129,10 @@ class CompetitiveRequest(BaseModel):
     primary_url: str
     competitor_urls: List[str] = []
 
+class PageAuditRequest(BaseModel):
+    url: str
+    parent_audit_id: str | None = None
+
 @app.on_event("startup")
 async def startup_event():
     await init_db()
@@ -558,6 +562,208 @@ async def get_enrichment_status(audit_id: str):
     }
 
 
+@app.post("/api/audit/{audit_id}/refresh-enrichment")
+async def refresh_enrichment(audit_id: str, background_tasks: BackgroundTasks):
+    """Manual refresh — checks DataForSEO status and triggers enrichment if ready.
+    Useful after the background poller has timed out."""
+    record = await get_audit_by_id(audit_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    report = record["report_json"]
+    if isinstance(report, str):
+        report = json.loads(report)
+
+    # Already complete — nothing to do
+    if report.get("enrichment_status") == "complete":
+        return {"enrichment_status": "complete", "message": "Enrichment already complete."}
+
+    task_id = report.get("crawl_task_id")
+    if not task_id:
+        return {"enrichment_status": report.get("enrichment_status", "failed"),
+                "message": "No crawl task associated with this audit."}
+
+    if not is_dataforseo_configured():
+        return {"enrichment_status": "failed", "message": "DataForSEO not configured."}
+
+    try:
+        dfs_client = DataForSEOClient()
+        summary = await dfs_client.get_summary(task_id)
+        crawl_progress = summary.get("crawl_progress", "unknown")
+        pages_crawled = summary.get("pages_crawled", 0)
+        pages_count = summary.get("pages_count", 0)
+
+        if crawl_progress == "finished":
+            # Crawl is done — trigger enrichment in background
+            await update_audit_report(audit_id, {
+                "enrichment_status": "polling",
+                "enrichment_progress": "Crawl complete. Building link graph and topic clusters...",
+            })
+            await update_dataforseo_task(task_id, status="completed", summary=summary)
+            background_tasks.add_task(
+                _enrich_report_from_crawl, task_id, dfs_client, summary
+            )
+            return {"enrichment_status": "polling",
+                    "message": "Crawl finished! Processing results now..."}
+        else:
+            await dfs_client.close()
+            progress_msg = f"Still crawling... {pages_crawled}/{pages_count} pages"
+            await update_audit_report(audit_id, {
+                "enrichment_status": "timed_out",
+                "enrichment_progress": progress_msg,
+            })
+            return {"enrichment_status": "timed_out",
+                    "message": progress_msg}
+    except Exception as e:
+        logger.warning(f"Manual refresh failed for audit {audit_id}: {e}")
+        return {"enrichment_status": "timed_out",
+                "message": f"Could not check crawl status: {str(e)}"}
+
+
+# --- Per-Page Audit Endpoints (Part 2) ---
+
+# Simple in-memory concurrency limiter per parent audit
+_page_audit_semaphores: dict[str, asyncio.Semaphore] = {}
+
+
+@app.post("/api/audit/page")
+async def run_page_audit(request: PageAuditRequest):
+    """Run the 10-pillar single-page audit on any URL.
+    Optionally links the result to a parent premium audit."""
+    url = request.url.strip()
+    if not url.startswith("http"):
+        url = "https://" + url
+    parent_id = request.parent_audit_id
+
+    # Verify parent audit exists if provided
+    if parent_id:
+        parent = await get_audit_by_id(parent_id)
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent audit not found")
+
+    # Rate limit: max 5 concurrent page audits per parent
+    if parent_id:
+        if parent_id not in _page_audit_semaphores:
+            _page_audit_semaphores[parent_id] = asyncio.Semaphore(5)
+        sem = _page_audit_semaphores[parent_id]
+        if sem.locked():
+            # Check if all 5 slots are taken
+            raise HTTPException(
+                status_code=429,
+                detail="Maximum 5 concurrent page audits. Please wait for one to finish.",
+            )
+    else:
+        sem = None
+
+    async def _run():
+        logger.info(f"Starting page audit for {url} (parent={parent_id})")
+        try:
+            html_content, soup = await fetch_page(url)
+
+            html_res = run_html_audit(soup, html_content)
+            sd_res = run_structured_data_audit(html_content, url)
+            css_js_res = run_css_js_audit(soup, html_content)
+            aeo_res = run_aeo_content_audit(soup, html_content)
+            rag_res = run_rag_readiness_audit(soup, html_content)
+            agent_res = run_agentic_protocol_audit(soup, html_content, url)
+            data_res = run_data_integrity_audit(soup, html_content)
+            il_res = run_internal_linking_audit(soup, html_content, url, site_data=None)
+            a11y_res = await run_accessibility_audit(url)
+
+            scores = compile_scores(
+                html_res, sd_res, aeo_res, css_js_res, a11y_res,
+                rag_res, agent_res, data_res, il_res,
+            )
+            report = generate_report(
+                url, html_res, sd_res, aeo_res, css_js_res, a11y_res,
+                rag_res, agent_res, data_res, scores, il_res, tier="page",
+            )
+
+            # Save as a separate audit record with tier="page"
+            audit_id = await save_audit_history(
+                url, "page",
+                report.get("overall_score", 0),
+                report.get("overall_label", "N/A"),
+                report, tier="page",
+            )
+            report["audit_id"] = str(audit_id)
+            report["parent_audit_id"] = parent_id
+
+            # Also store the page audit reference in the parent's report_json
+            if parent_id:
+                try:
+                    parent_record = await get_audit_by_id(parent_id)
+                    if parent_record and parent_record.get("report_json"):
+                        rj = parent_record["report_json"]
+                        if isinstance(rj, str):
+                            rj = json.loads(rj)
+                        page_audits = rj.get("page_audits", {})
+                        page_audits[url] = {
+                            "audit_id": str(audit_id),
+                            "score": report.get("overall_score", 0),
+                            "label": report.get("overall_label", "N/A"),
+                            "timestamp": report.get("timestamp", ""),
+                        }
+                        await update_audit_report(parent_id, {"page_audits": page_audits})
+                except Exception as e:
+                    logger.warning(f"Failed to save page audit ref to parent (non-fatal): {e}")
+
+            logger.info(f"Page audit complete for {url}: score={report.get('overall_score', 0)}")
+            return report
+
+        except Exception as e:
+            logger.error(f"Page audit failed for {url}: {e}")
+            raise HTTPException(status_code=500, detail=f"Page audit failed: {str(e)}")
+
+    if sem:
+        async with sem:
+            return await _run()
+    return await _run()
+
+
+@app.get("/api/audit/{parent_audit_id}/page-audit")
+async def get_page_audit(parent_audit_id: str, url: str):
+    """Retrieve page audit results for a specific URL under a parent audit.
+    Returns 404 if no page audit has been run for this URL yet."""
+    parent = await get_audit_by_id(parent_audit_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent audit not found")
+
+    rj = parent["report_json"]
+    if isinstance(rj, str):
+        rj = json.loads(rj)
+
+    page_audits = rj.get("page_audits", {})
+    ref = page_audits.get(url)
+    if not ref or not ref.get("audit_id"):
+        raise HTTPException(status_code=404, detail="No page audit found for this URL")
+
+    # Fetch the full page audit report
+    page_record = await get_audit_by_id(ref["audit_id"])
+    if not page_record:
+        raise HTTPException(status_code=404, detail="Page audit record not found")
+
+    report = page_record["report_json"]
+    if isinstance(report, str):
+        report = json.loads(report)
+    report["audit_id"] = ref["audit_id"]
+    report["parent_audit_id"] = parent_audit_id
+    return report
+
+
+@app.get("/api/audit/{parent_audit_id}/page-audits")
+async def list_page_audits(parent_audit_id: str):
+    """List all page audits that have been run under a parent audit."""
+    parent = await get_audit_by_id(parent_audit_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent audit not found")
+
+    rj = parent["report_json"]
+    if isinstance(rj, str):
+        rj = json.loads(rj)
+
+    return {"page_audits": rj.get("page_audits", {})}
+
+
 @app.get("/api/audits")
 async def get_all_audits(
     limit: int = 100, offset: int = 0,
@@ -606,6 +812,17 @@ async def get_fix_for_finding(finding_pattern: str):
 # --- DataForSEO Crawl Endpoints (Sprint 3A) ---
 
 
+def _poll_interval(attempt: int) -> int:
+    """Progressive poll intervals: fast at start, slower over time.
+    Polls 1-10: 15s, polls 11-30: 20s, polls 31-60: 30s.
+    Total: ~25 minutes of polling before timeout."""
+    if attempt <= 10:
+        return 15
+    if attempt <= 30:
+        return 20
+    return 30
+
+
 async def _poll_and_enrich_crawl(task_id: str, audit_id: str):
     """Poll DataForSEO summary until crawl completes, then enrich the audit report.
 
@@ -614,9 +831,9 @@ async def _poll_and_enrich_crawl(task_id: str, audit_id: str):
     will already have status='completed' and this poller will skip straight to
     enrichment on its next iteration.
     """
-    max_attempts = 30  # 30 × 20s = 10 minutes max wait
+    max_attempts = 60  # progressive intervals totalling ~25 minutes
     for attempt in range(1, max_attempts + 1):
-        await asyncio.sleep(20)
+        await asyncio.sleep(_poll_interval(attempt))
 
         try:
             # Check if the pingback already handled this task
@@ -654,10 +871,14 @@ async def _poll_and_enrich_crawl(task_id: str, audit_id: str):
                 f"progress={crawl_progress} pages={pages_crawled}/{pages_count}"
             )
 
-            # Write progress update so frontend can show what's happening
-            progress_msg = f"Crawling site... {pages_crawled}/{pages_count} pages (poll {attempt}/{max_attempts})"
-            if crawl_progress == "in_progress":
+            # Build informative progress message
+            if crawl_progress == "in_progress" and pages_crawled > 0:
                 progress_msg = f"Crawling site... {pages_crawled}/{pages_count} pages discovered (poll {attempt}/{max_attempts})"
+            elif attempt > 10 and pages_crawled == 0:
+                progress_msg = f"Waiting for crawler to start... This can take a few minutes for larger sites. (poll {attempt}/{max_attempts})"
+            else:
+                progress_msg = f"Crawling site... {pages_crawled}/{pages_count} pages (poll {attempt}/{max_attempts})"
+
             await update_audit_report(audit_id, {
                 "enrichment_status": "polling",
                 "enrichment_progress": progress_msg,
@@ -676,14 +897,14 @@ async def _poll_and_enrich_crawl(task_id: str, audit_id: str):
         except Exception as e:
             logger.warning(f"DataForSEO poll error (attempt {attempt}): {e}")
 
-    # Timed out
+    # Timed out — use "timed_out" status (not "failed") so frontend can distinguish
     logger.warning(
-        f"DataForSEO crawl timed out after {max_attempts * 20}s for task {task_id}, "
-        f"audit {audit_id}. Results can still arrive via pingback or manual trigger."
+        f"DataForSEO crawl timed out after {max_attempts} polls for task {task_id}, "
+        f"audit {audit_id}. Results can still arrive via pingback or manual refresh."
     )
     await update_audit_report(audit_id, {
-        "enrichment_status": "failed",
-        "enrichment_progress": "Crawl timed out. Results may still arrive via webhook.",
+        "enrichment_status": "timed_out",
+        "enrichment_progress": "Crawl is still running. Data will appear when it completes. Try refreshing in a few minutes.",
     })
 
 

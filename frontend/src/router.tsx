@@ -35,6 +35,9 @@ const DashboardPillarPage = lazy(
 const DashboardPagesPage = lazy(
   () => import('./pages/DashboardPagesPage')
 );
+const DashboardPageAuditPage = lazy(
+  () => import('./pages/DashboardPageAuditPage')
+);
 const AdminPanel = lazy(
   () => import('./components/auth/AdminPanel')
 );
@@ -157,6 +160,14 @@ export const router = createBrowserRouter([
         element: (
           <Suspense fallback={dashboardFallback}>
             <DashboardPagesPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'page-audit',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardPageAuditPage />
           </Suspense>
         ),
       },

@@ -31,6 +31,7 @@ import {
   Loader2,
   CheckCircle2,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { PILLAR_LABELS } from '../constants/pillarLabels';
 import { Globe } from 'lucide-react';
@@ -374,6 +375,34 @@ export default function DashboardLayout() {
                 <p className="text-sm font-semibold text-green-900">
                   Report enrichment complete! Refreshing data...
                 </p>
+              </div>
+            </motion.div>
+          )}
+          {enrichment.status === 'timed_out' && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mx-4 mt-4 lg:mx-6 lg:mt-5"
+            >
+              <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-3.5 flex items-start gap-3">
+                <Loader2 size={18} className="text-blue-600 animate-spin mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-blue-900">
+                    Crawl is still processing
+                  </p>
+                  <p className="text-xs text-blue-700 mt-0.5">
+                    Link graph and topic clusters will appear once complete. This can take up to 20 minutes for larger sites.
+                  </p>
+                  <button
+                    onClick={() => enrichment.refreshNow()}
+                    disabled={enrichment.isRefreshing}
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw size={12} className={enrichment.isRefreshing ? 'animate-spin' : ''} />
+                    {enrichment.isRefreshing ? 'Checking...' : 'Refresh now'}
+                  </button>
+                </div>
               </div>
             </motion.div>
           )}

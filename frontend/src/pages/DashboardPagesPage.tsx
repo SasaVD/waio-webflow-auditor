@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router';
 import { motion } from 'framer-motion';
 import {
@@ -11,9 +11,13 @@ import {
   Search,
   ArrowUpDown,
   AlertTriangle,
+  RefreshCw,
+  FileSearch,
 } from 'lucide-react';
 import { useAuditStore } from '../stores/auditStore';
 import { useEnrichmentPolling } from '../hooks/useEnrichmentPolling';
+
+const apiBase = import.meta.env.PROD ? '' : 'http://127.0.0.1:8000';
 
 interface PageNode {
   id: string;
@@ -24,6 +28,19 @@ interface PageNode {
   depth: number | null;
   is_orphan: boolean;
 }
+
+interface PageAuditRef {
+  audit_id: string;
+  score: number;
+  label: string;
+}
+
+const scoreBadgeColor = (score: number): string => {
+  if (score >= 85) return 'text-green-700 bg-green-50 border-green-200';
+  if (score >= 70) return 'text-yellow-700 bg-yellow-50 border-yellow-200';
+  if (score >= 50) return 'text-orange-700 bg-orange-50 border-orange-200';
+  return 'text-red-700 bg-red-50 border-red-200';
+};
 
 type SortField = 'url' | 'inbound' | 'outbound' | 'depth';
 type SortDir = 'asc' | 'desc';
@@ -37,6 +54,60 @@ export default function DashboardPagesPage() {
   const [sortField, setSortField] = useState<SortField>('inbound');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [filterOrphans, setFilterOrphans] = useState(false);
+
+  // Page audit tracking
+  const [pageAudits, setPageAudits] = useState<Record<string, PageAuditRef>>({});
+  const [runningAudits, setRunningAudits] = useState<Set<string>>(new Set());
+
+  // Load existing page audits from the parent report
+  useEffect(() => {
+    const pa = report?.page_audits as Record<string, PageAuditRef> | undefined;
+    if (pa) setPageAudits(pa);
+  }, [report?.page_audits]);
+
+  // Also fetch from API to get the latest (covers case where report was cached before audit ran)
+  useEffect(() => {
+    if (!auditId) return;
+    fetch(`${apiBase}/api/audit/${auditId}/page-audits`, { credentials: 'include' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.page_audits) {
+          setPageAudits((prev) => ({ ...prev, ...data.page_audits }));
+        }
+      })
+      .catch(() => {});
+  }, [auditId]);
+
+  const handleRunAudit = async (url: string) => {
+    setRunningAudits((prev) => new Set(prev).add(url));
+    try {
+      const res = await fetch(`${apiBase}/api/audit/page`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ url, parent_audit_id: auditId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPageAudits((prev) => ({
+          ...prev,
+          [url]: {
+            audit_id: data.audit_id,
+            score: data.overall_score ?? 0,
+            label: data.overall_label ?? '',
+          },
+        }));
+      }
+    } catch {
+      // Silently fail — user can retry
+    } finally {
+      setRunningAudits((prev) => {
+        const next = new Set(prev);
+        next.delete(url);
+        return next;
+      });
+    }
+  };
 
   const nodes: PageNode[] = useMemo(() => {
     const graph = report?.link_analysis?.graph;
@@ -132,7 +203,7 @@ export default function DashboardPagesPage() {
       </motion.div>
 
       {/* Loading state */}
-      {!hasData && enrichment.status === 'polling' ? (
+      {!hasData && (enrichment.status === 'polling' || enrichment.status === 'timed_out') ? (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -140,13 +211,27 @@ export default function DashboardPagesPage() {
         >
           <Loader2 size={32} className="text-indigo-500 animate-spin mx-auto mb-4" />
           <p className="text-sm font-semibold text-text mb-1">
-            Site crawl in progress
+            {enrichment.status === 'timed_out'
+              ? 'The site crawl is still processing'
+              : 'Site crawl in progress'}
           </p>
           <p className="text-xs text-text-muted max-w-md mx-auto">
-            Page data will appear once the DataForSEO crawl completes. This typically takes 2-5 minutes.
+            {enrichment.status === 'timed_out'
+              ? 'This can take up to 20 minutes for larger sites. Page data will appear automatically when ready.'
+              : 'Page data will appear once the DataForSEO crawl completes. This typically takes 2-5 minutes.'}
           </p>
           {enrichment.progress && (
             <p className="text-xs text-indigo-600 mt-3">{enrichment.progress}</p>
+          )}
+          {enrichment.status === 'timed_out' && (
+            <button
+              onClick={() => enrichment.refreshNow()}
+              disabled={enrichment.isRefreshing}
+              className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-700 hover:text-indigo-900 bg-indigo-100 hover:bg-indigo-200 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={enrichment.isRefreshing ? 'animate-spin' : ''} />
+              {enrichment.isRefreshing ? 'Checking...' : 'Refresh now'}
+            </button>
           )}
         </motion.div>
       ) : !hasData && enrichment.status === 'failed' ? (
@@ -267,24 +352,38 @@ export default function DashboardPagesPage() {
                     <th className="text-center px-3 py-3 text-xs font-bold text-text-muted uppercase tracking-wider">
                       Status
                     </th>
+                    <th className="text-center px-3 py-3 text-xs font-bold text-text-muted uppercase tracking-wider">
+                      Audit
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredNodes.slice(0, 200).map((node) => (
+                  {filteredNodes.slice(0, 200).map((node) => {
+                    const pa = pageAudits[node.id];
+                    const isRunning = runningAudits.has(node.id);
+                    return (
                     <tr
                       key={node.id}
                       className="border-b border-border/50 hover:bg-surface-overlay/50 transition-colors"
                     >
                       <td className="px-4 py-2.5">
-                        <a
-                          href={node.id}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm text-accent hover:text-accent-hover font-medium inline-flex items-center gap-1 max-w-xs truncate"
-                        >
-                          {urlPath(node.id)}
-                          <ExternalLink size={10} className="flex-shrink-0 opacity-50" />
-                        </a>
+                        <div className="flex items-center gap-1.5 max-w-xs">
+                          <Link
+                            to={`/dashboard/${auditId}/page-audit?url=${encodeURIComponent(node.id)}`}
+                            className="text-sm text-accent hover:text-accent-hover font-medium truncate"
+                          >
+                            {urlPath(node.id)}
+                          </Link>
+                          <a
+                            href={node.id}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-shrink-0 text-text-muted hover:text-text-secondary transition-colors"
+                            title="Open in new tab"
+                          >
+                            <ExternalLink size={10} />
+                          </a>
+                        </div>
                       </td>
                       <td className="px-4 py-2.5 text-text-secondary text-xs truncate max-w-[200px] hidden sm:table-cell">
                         {node.label}
@@ -309,8 +408,31 @@ export default function DashboardPagesPage() {
                           </span>
                         )}
                       </td>
+                      <td className="px-3 py-2.5 text-center">
+                        {isRunning ? (
+                          <Loader2 size={14} className="text-accent animate-spin mx-auto" />
+                        ) : pa ? (
+                          <Link
+                            to={`/dashboard/${auditId}/page-audit?url=${encodeURIComponent(node.id)}`}
+                            className={`inline-block text-[11px] font-bold px-2 py-0.5 rounded-full border ${scoreBadgeColor(pa.score)}`}
+                            title={`Score: ${pa.score} — Click to view results`}
+                          >
+                            {pa.score}
+                          </Link>
+                        ) : (
+                          <button
+                            onClick={() => handleRunAudit(node.id)}
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold text-accent hover:text-accent-hover bg-accent/5 hover:bg-accent/10 px-2 py-1 rounded-lg transition-colors"
+                            title="Run 10-pillar audit on this page"
+                          >
+                            <FileSearch size={10} />
+                            Audit
+                          </button>
+                        )}
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
