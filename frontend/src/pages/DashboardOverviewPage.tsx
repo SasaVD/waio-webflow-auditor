@@ -20,6 +20,10 @@ import {
   Radio,
   ShieldCheck,
   Link2,
+  ArrowRightLeft,
+  Shield,
+  Clock,
+  Server,
 } from 'lucide-react';
 import { useAuditStore } from '../stores/auditStore';
 import { KpiCard } from '../components/dashboard/KpiCard';
@@ -146,6 +150,21 @@ export default function DashboardOverviewPage() {
       }));
   }, [report]);
 
+  // CMS detection info
+  const cmsInfo = useMemo(() => {
+    const det = report?.cms_detection as Record<string, unknown> | null;
+    return {
+      platform: (det?.platform as string) ?? 'unknown',
+      confidence: (det?.confidence as number) ?? 0,
+    };
+  }, [report]);
+
+  // Migration assessment (only for non-Webflow sites)
+  const migration = useMemo(() => {
+    if (!report?.migration_assessment) return null;
+    return report.migration_assessment as Record<string, unknown>;
+  }, [report]);
+
   if (!report) {
     return (
       <div className="p-8 text-center">
@@ -182,9 +201,10 @@ export default function DashboardOverviewPage() {
             <span className="text-xs font-semibold text-text-muted uppercase tracking-widest">
               Dashboard
             </span>
-            {report.detected_cms && (
+            {cmsInfo.platform && cmsInfo.platform !== 'unknown' && (
               <span className="text-[10px] font-bold text-accent bg-accent-muted px-2 py-0.5 rounded-full uppercase">
-                {report.detected_cms}
+                {cmsInfo.platform}
+                {cmsInfo.confidence > 0 && ` ${Math.round(cmsInfo.confidence * 100)}%`}
               </span>
             )}
           </div>
@@ -391,6 +411,115 @@ export default function DashboardOverviewPage() {
           })}
         </div>
       </motion.div>
+
+      {/* Migration Intelligence — only for non-Webflow sites */}
+      {migration && cmsInfo.platform !== 'webflow' && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="space-y-4"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+              <ArrowRightLeft size={16} className="text-indigo-600" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-text uppercase tracking-widest">
+                Migration Intelligence
+              </h2>
+              <p className="text-xs text-text-muted">
+                {cmsInfo.platform.charAt(0).toUpperCase() + cmsInfo.platform.slice(1)} → Webflow migration assessment
+              </p>
+            </div>
+          </div>
+
+          {/* Migration summary cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-surface-raised border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Server size={14} className="text-text-muted" />
+                <span className="text-xs font-semibold text-text-muted">Current Platform</span>
+              </div>
+              <div className="text-lg font-bold text-text font-heading capitalize">
+                {(migration.source_cms as string) ?? cmsInfo.platform}
+              </div>
+              <div className="text-xs text-text-muted mt-0.5">
+                {cmsInfo.confidence > 0 && `${Math.round(cmsInfo.confidence * 100)}% confidence`}
+              </div>
+            </div>
+            <div className="bg-surface-raised border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Clock size={14} className="text-text-muted" />
+                <span className="text-xs font-semibold text-text-muted">Est. Timeline</span>
+              </div>
+              <div className="text-lg font-bold text-text font-heading">
+                {(migration.migration_timeline as string) ?? 'TBD'}
+              </div>
+            </div>
+            <div className="bg-surface-raised border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <ArrowRightLeft size={14} className="text-text-muted" />
+                <span className="text-xs font-semibold text-text-muted">Est. Redirects</span>
+              </div>
+              <div className="text-lg font-bold text-text font-heading">
+                {(migration.redirect_count_estimate as number)?.toLocaleString() ?? '—'}
+              </div>
+            </div>
+          </div>
+
+          {/* Platform issues */}
+          {Array.isArray(migration.platform_issues) && (migration.platform_issues as Array<Record<string, string>>).length > 0 && (
+            <div className="bg-surface-raised border border-border rounded-xl p-5">
+              <h3 className="text-xs font-bold text-text-muted uppercase tracking-widest mb-3 flex items-center gap-2">
+                <Shield size={13} />
+                Platform-Specific Risks
+              </h3>
+              <div className="space-y-2.5">
+                {(migration.platform_issues as Array<Record<string, string>>).slice(0, 5).map((issue, i) => {
+                  const sevColor: Record<string, string> = {
+                    critical: 'bg-severity-critical',
+                    high: 'bg-severity-high',
+                    medium: 'bg-severity-medium',
+                  };
+                  return (
+                    <div key={i} className="flex items-start gap-3 p-3 bg-surface-overlay rounded-lg">
+                      <span className={`text-[10px] font-bold uppercase text-white px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0 ${sevColor[issue.severity] ?? 'bg-text-muted'}`}>
+                        {issue.severity}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-text">{issue.title}</p>
+                        <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">{issue.description}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Webflow advantages */}
+          {Array.isArray(migration.webflow_advantages) && (migration.webflow_advantages as Array<Record<string, string>>).length > 0 && (
+            <div className="bg-surface-raised border border-border rounded-xl p-5">
+              <h3 className="text-xs font-bold text-text-muted uppercase tracking-widest mb-3 flex items-center gap-2">
+                <CheckCircle2 size={13} className="text-success" />
+                Webflow Migration Benefits
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {(migration.webflow_advantages as Array<Record<string, string>>).slice(0, 6).map((adv, i) => (
+                  <div key={i} className="flex items-start gap-2.5 p-3 bg-success/5 border border-success/10 rounded-lg">
+                    <CheckCircle2 size={14} className="text-success mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-text">{adv.title}</p>
+                      <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">{adv.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </motion.div>
+      )}
     </div>
   );
 }

@@ -29,6 +29,12 @@ const DashboardClustersPage = lazy(
 const DashboardExportPage = lazy(
   () => import('./pages/DashboardExportPage')
 );
+const DashboardPillarPage = lazy(
+  () => import('./pages/DashboardPillarPage')
+);
+const DashboardPagesPage = lazy(
+  () => import('./pages/DashboardPagesPage')
+);
 const AdminPanel = lazy(
   () => import('./components/auth/AdminPanel')
 );
@@ -135,6 +141,22 @@ export const router = createBrowserRouter([
         element: (
           <Suspense fallback={dashboardFallback}>
             <DashboardExportPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'pillar/:pillarSlug',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardPillarPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'pages',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardPagesPage />
           </Suspense>
         ),
       },

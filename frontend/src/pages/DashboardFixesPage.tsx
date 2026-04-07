@@ -24,6 +24,10 @@ export default function DashboardFixesPage() {
   const { auditId } = useParams();
   const report = useAuditStore((s) => s.report);
 
+  const detectedCms = (report?.cms_detection as Record<string, unknown> | null)?.platform as string | undefined;
+  const cmsConfidence = (report?.cms_detection as Record<string, unknown> | null)?.confidence as number | undefined;
+  const isWebflow = detectedCms === 'webflow';
+
   const fixesByPillar = useMemo(() => {
     const raw: Record<string, Fix> = report?.webflow_fixes ?? {};
     const fixes = Object.values(raw);
@@ -37,6 +41,17 @@ export default function DashboardFixesPage() {
     }
     return grouped;
   }, [report]);
+
+  // Build header text based on detected CMS
+  const headerTitle = isWebflow
+    ? 'Webflow Fix Guide'
+    : 'Fix Guide';
+
+  const headerSubtitle = isWebflow
+    ? 'Step-by-step instructions to fix each issue in Webflow.'
+    : detectedCms && detectedCms !== 'unknown'
+      ? `Step-by-step instructions to fix each issue. Your site was detected as ${detectedCms.charAt(0).toUpperCase() + detectedCms.slice(1)}${cmsConfidence ? ` (${Math.round(cmsConfidence * 100)}% confidence)` : ''}.`
+      : 'Step-by-step instructions to fix each issue.';
 
   return (
     <div className="p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
@@ -57,14 +72,29 @@ export default function DashboardFixesPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-text font-heading">
-              Webflow Fix Guide
+              {headerTitle}
             </h1>
             <p className="text-sm text-text-secondary mt-0.5">
-              Step-by-step instructions to fix each issue in Webflow.
+              {headerSubtitle}
             </p>
           </div>
         </div>
       </motion.div>
+
+      {/* CMS badge */}
+      {detectedCms && detectedCms !== 'unknown' && !isWebflow && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3"
+        >
+          <Info size={16} className="text-amber-600 flex-shrink-0" />
+          <p className="text-xs text-amber-800">
+            These are platform-agnostic fix instructions. For CMS-specific guidance,
+            consider migrating to Webflow where Veza Digital provides tailored implementation support.
+          </p>
+        </motion.div>
+      )}
 
       {fixesByPillar ? (
         <div className="space-y-8">
@@ -150,7 +180,7 @@ export default function DashboardFixesPage() {
           </p>
           <p className="text-xs text-text-muted max-w-md mx-auto">
             Fix instructions will appear after premium analysis. Run a
-            Comprehensive Audit to generate Webflow-specific fix guides.
+            Comprehensive Audit to generate fix guides for your site.
           </p>
         </motion.div>
       )}

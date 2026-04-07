@@ -25,6 +25,7 @@ from scoring import compile_scores
 from report_generator import generate_report
 from executive_summary_generator import generate_executive_summary
 from webflow_fixes import get_fix, get_all_fixes, match_fixes_to_findings
+from generic_fixes import match_generic_fixes_to_findings
 from pdf_generator import generate_pdf
 from md_generator import generate_markdown
 from email_sender import send_report_email
@@ -308,15 +309,7 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
         except Exception as e:
             logger.warning(f"Executive summary failed (non-fatal): {e}")
 
-        # Sprint 2B: Matched Webflow fix instructions
-        try:
-            report["webflow_fixes"] = match_fixes_to_findings(report)
-            fix_count = len(report["webflow_fixes"]) if report["webflow_fixes"] else 0
-            logger.info(f"Webflow fixes matched: {fix_count} fixes")
-        except Exception as e:
-            logger.warning(f"Webflow fix matching failed (non-fatal): {e}")
-
-        # Sprint 3F: CMS detection on homepage HTML (zero-cost)
+        # Sprint 3F: CMS detection on homepage HTML (zero-cost) — run before fix matching
         try:
             parsed = urlparse(url)
             domain = parsed.hostname or parsed.netloc
@@ -325,6 +318,18 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
             logger.info(f"CMS detected: {cms_result.platform} (confidence={cms_result.confidence})")
         except Exception as e:
             logger.warning(f"CMS detection failed (non-fatal): {e}")
+
+        # Sprint 2B + CMS-aware fix instructions
+        try:
+            detected_cms = (report.get("cms_detection") or {}).get("platform", "unknown")
+            if detected_cms == "webflow":
+                report["webflow_fixes"] = match_fixes_to_findings(report)
+            else:
+                report["webflow_fixes"] = match_generic_fixes_to_findings(report)
+            fix_count = len(report["webflow_fixes"]) if report["webflow_fixes"] else 0
+            logger.info(f"Fix instructions matched ({detected_cms}): {fix_count} fixes")
+        except Exception as e:
+            logger.warning(f"Fix matching failed (non-fatal): {e}")
 
         # Sprint 4A: Content extraction on homepage (Trafilatura)
         extracted = None

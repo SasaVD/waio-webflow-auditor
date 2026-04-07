@@ -33,6 +33,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { PILLAR_LABELS } from '../constants/pillarLabels';
+import { Globe } from 'lucide-react';
 
 interface NavItem {
   icon: React.ElementType;
@@ -49,24 +50,24 @@ const navGroups: NavGroup[] = [
   {
     label: 'Technical Health',
     items: [
-      { icon: FileCode, label: PILLAR_LABELS.semantic_html, href: '#semantic_html' },
-      { icon: Paintbrush, label: PILLAR_LABELS.css_quality, href: '#css_quality' },
-      { icon: Zap, label: PILLAR_LABELS.js_bloat, href: '#js_bloat' },
-      { icon: ShieldCheck, label: PILLAR_LABELS.data_integrity, href: '#data_integrity' },
+      { icon: FileCode, label: PILLAR_LABELS.semantic_html, href: 'pillar/search-engine-clarity' },
+      { icon: Paintbrush, label: PILLAR_LABELS.css_quality, href: 'pillar/visual-consistency' },
+      { icon: Zap, label: PILLAR_LABELS.js_bloat, href: 'pillar/page-speed' },
+      { icon: ShieldCheck, label: PILLAR_LABELS.data_integrity, href: 'pillar/tracking-analytics' },
     ],
   },
   {
     label: 'Content & SEO',
     items: [
-      { icon: BookOpen, label: PILLAR_LABELS.aeo_content, href: '#aeo_content' },
-      { icon: FileJson, label: PILLAR_LABELS.structured_data, href: '#structured_data' },
-      { icon: Layers, label: PILLAR_LABELS.rag_readiness, href: '#rag_readiness' },
+      { icon: BookOpen, label: PILLAR_LABELS.aeo_content, href: 'pillar/ai-answer-readiness' },
+      { icon: FileJson, label: PILLAR_LABELS.structured_data, href: 'pillar/rich-search-presence' },
+      { icon: Layers, label: PILLAR_LABELS.rag_readiness, href: 'pillar/ai-retrieval-readiness' },
     ],
   },
   {
     label: 'Links & Architecture',
     items: [
-      { icon: Link2, label: PILLAR_LABELS.internal_linking, href: '#internal_linking' },
+      { icon: Link2, label: PILLAR_LABELS.internal_linking, href: 'pillar/content-architecture' },
       { icon: Network, label: 'Link Graph', href: 'graph' },
       { icon: FolderTree, label: 'Topic Clusters', href: 'clusters' },
     ],
@@ -74,8 +75,14 @@ const navGroups: NavGroup[] = [
   {
     label: 'Accessibility & Protocols',
     items: [
-      { icon: Accessibility, label: PILLAR_LABELS.accessibility, href: '#accessibility' },
-      { icon: Radio, label: PILLAR_LABELS.agentic_protocols, href: '#agentic_protocols' },
+      { icon: Accessibility, label: PILLAR_LABELS.accessibility, href: 'pillar/inclusive-reach' },
+      { icon: Radio, label: PILLAR_LABELS.agentic_protocols, href: 'pillar/ai-agent-compatibility' },
+    ],
+  },
+  {
+    label: 'Site Crawl',
+    items: [
+      { icon: Globe, label: 'Crawled Pages', href: 'pages' },
     ],
   },
   {
@@ -140,7 +147,6 @@ export default function DashboardLayout() {
     setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
 
   const isActive = (href: string) => {
-    if (href.startsWith('#')) return false; // Anchor links — no active state
     const full = `/dashboard/${auditId}/${href}`;
     return location.pathname === full;
   };
@@ -232,9 +238,7 @@ export default function DashboardLayout() {
               <div className="space-y-0.5 pb-2">
                 {group.items.map((item) => {
                   const active = isActive(item.href);
-                  const resolvedHref = item.href.startsWith('#')
-                    ? `/dashboard/${auditId}${item.href}`
-                    : `/dashboard/${auditId}/${item.href}`;
+                  const resolvedHref = `/dashboard/${auditId}/${item.href}`;
 
                   return (
                     <Link
