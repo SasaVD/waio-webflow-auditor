@@ -149,6 +149,45 @@ export default function DashboardPagesPage() {
   const crawlStats = report?.crawl_stats as Record<string, number> | null;
   const hasData = nodes.length > 0;
 
+  // Build inDegree map from actual edges (matches LinkGraph computation)
+  const inDegreeMap = useMemo(() => {
+    const graphLinks = (report?.link_analysis as Record<string, any>)?.graph?.links as
+      | Array<Record<string, any>>
+      | undefined;
+    const map = new Map<string, number>();
+    for (const n of nodes) map.set(n.id, 0);
+    if (graphLinks) {
+      for (const link of graphLinks) {
+        const tgt =
+          typeof link.target === 'string'
+            ? link.target
+            : (link.target as Record<string, string>)?.id ?? '';
+        map.set(tgt, (map.get(tgt) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [report, nodes]);
+
+  // Detect homepage so we don't count it as an orphan
+  const homepageId = useMemo(() => {
+    if (nodes.length === 0) return null;
+    const baseUrl = report?.url as string | undefined;
+    if (baseUrl) {
+      const match = nodes.find((n) => {
+        try {
+          const pathname = new URL(n.id).pathname;
+          return pathname === '/' || pathname === '';
+        } catch {
+          return n.id === baseUrl || n.id === '/';
+        }
+      });
+      if (match) return match.id;
+    }
+    return nodes.find((n) => {
+      try { return new URL(n.id).pathname === '/'; } catch { return n.id === '/'; }
+    })?.id ?? null;
+  }, [nodes, report]);
+
   // Compute link stats from graph data when crawl_stats is missing or zero
   const linkStats = useMemo(() => {
     const graphLinks = (report?.link_analysis as Record<string, any>)?.graph?.links;
@@ -173,7 +212,7 @@ export default function DashboardPagesPage() {
       );
     }
     if (filterOrphans) {
-      result = result.filter((n) => n.is_orphan);
+      result = result.filter(isOrphan);
     }
     result = [...result].sort((a, b) => {
       let av: number | string, bv: number | string;
@@ -221,7 +260,12 @@ export default function DashboardPagesPage() {
     }
   };
 
-  const orphanCount = nodes.filter((n) => n.is_orphan).length;
+  // Orphan = 0 inbound edges, excluding homepage (matches LinkGraph logic)
+  const isOrphan = (n: PageNode): boolean => {
+    const inbound = inDegreeMap.get(n.id) ?? 0;
+    return inbound === 0 && n.id !== homepageId;
+  };
+  const orphanCount = nodes.filter(isOrphan).length;
 
   // Extract path from full URL
   const urlPath = (url: string) => {
@@ -492,7 +536,7 @@ export default function DashboardPagesPage() {
                         );
                       })()}
                       <td className="px-3 py-2.5 text-center">
-                        {node.is_orphan ? (
+                        {isOrphan(node) ? (
                           <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
                             Orphan
                           </span>

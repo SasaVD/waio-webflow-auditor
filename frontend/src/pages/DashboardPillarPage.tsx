@@ -126,7 +126,12 @@ export default function DashboardPillarPage() {
   const { auditId, pillarSlug } = useParams();
   const report = useAuditStore((s) => s.report);
 
-  const pillarKey = pillarSlug ? SLUG_TO_KEY[pillarSlug] : undefined;
+  // Resolve slug → pillar key: try the known mapping first, then fall back to
+  // using the slug itself as a key (handles cases like /pillar/js_bloat).
+  const pillarKey = pillarSlug
+    ? SLUG_TO_KEY[pillarSlug] ??
+      (PILLAR_LABELS[pillarSlug] ? pillarSlug : undefined)
+    : undefined;
   const label = pillarKey ? PILLAR_LABELS[pillarKey] : pillarSlug;
   const description = pillarKey ? PILLAR_DESCRIPTIONS[pillarKey] : '';
   const PillarIcon = pillarKey ? (pillarIcons[pillarKey] ?? FileCode) : FileCode;

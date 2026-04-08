@@ -21,6 +21,7 @@ Pure Python module: depends only on numpy, scipy, and standard library.
 
 import math
 import logging
+import random
 from collections import defaultdict
 
 import numpy as np
@@ -227,6 +228,16 @@ def _url_cluster(url: str) -> str:
     return "/"
 
 
+def _short_path(url: str) -> str:
+    """Return just the URL path (e.g. /blog/seo-guide) for readable output."""
+    from urllib.parse import urlparse
+
+    try:
+        return urlparse(url).path or "/"
+    except Exception:
+        return url
+
+
 # ---------------------------------------------------------------------------
 # 1F. Recommendation Engine
 # ---------------------------------------------------------------------------
@@ -297,9 +308,36 @@ def generate_link_recommendations(
     stars = [p for p in tipr_pages if p["classification"] == QUADRANT_STAR]
     stars.sort(key=lambda p: p["pagerank_score"] or 0, reverse=True)
 
+    # Compute site-wide averages for contextual templates
+    all_inbound = [p["inbound_count"] or 0 for p in tipr_pages]
+    avg_inbound = sum(all_inbound) / max(len(all_inbound), 1)
+
+    # Percentile rank lookup for readable "top X%" labels
+    all_pr_scores = sorted(((p["pagerank_score"] or 0) for p in tipr_pages), reverse=True)
+    pr_rank_cache: dict[str, int] = {}
+    for p in tipr_pages:
+        pr_val = p["pagerank_score"] or 0
+        rank_idx = sum(1 for v in all_pr_scores if v > pr_val)
+        pr_rank_cache[p["url"]] = max(1, int((rank_idx / max(len(all_pr_scores), 1)) * 100))
+
     recommendations: list[dict] = []
     source_rec_count: dict[str, int] = defaultdict(int)
     target_rec_count: dict[str, int] = defaultdict(int)
+
+    # --- Varied impact text templates ---
+    def _impact_text(tgt: dict, delta: int) -> str:
+        tgt_cls = tgt.get("classification", "")
+        tgt_path = _short_path(tgt.get("url", ""))
+        options = [
+            f"+{delta} PR points for {tgt_path}",
+            f"Could increase {tgt_path}'s internal authority by ~{max(5, delta * 3)}%",
+            f"Estimated +{delta} PageRank points, improving crawl priority for {tgt_path}",
+        ]
+        if tgt_cls == QUADRANT_DEAD_WEIGHT:
+            options.append(f"Could move {tgt_path} from Dead Weight toward Waster or Star quadrant")
+        if tgt_cls == QUADRANT_WASTER:
+            options.append(f"Could move {tgt_path} from Waster to Star quadrant with added authority")
+        return random.choice(options)
 
     def _add_rec(
         rec_type: str,
@@ -333,7 +371,7 @@ def generate_link_recommendations(
             "source_url": source_url,
             "target_url": target_url,
             "reason": reason,
-            "expected_impact": f"+{delta} PR points for target",
+            "expected_impact": _impact_text(tgt, delta) if target_url else "Concentrate equity across fewer, higher-value links",
             "source_pr_score": round(src_pr, 1),
             "target_pr_score": round(tgt_pr, 1),
             "source_outlinks": src_out,
@@ -345,6 +383,115 @@ def generate_link_recommendations(
         target_rec_count[target_url] += 1
         existing_edges.add((source_url, target_url))
         return True
+
+    # --- Hoarder redistribution templates ---
+    _HOARDER_TEMPLATES = [
+        lambda s, t: (
+            f"**{_short_path(s['url'])}** receives {s['inbound_count'] or 0} inbound links "
+            f"but only links out to {s['outbound_count'] or 0} pages. It's accumulating "
+            f"authority without sharing it. Adding a contextual link to "
+            f"**{_short_path(t['url'])}** (currently underlinked with only "
+            f"{t['inbound_count'] or 0} inbound links) would redistribute equity to your "
+            f"{_url_cluster(t['url']).strip('/')} content."
+        ),
+        lambda s, t: (
+            f"Your **{_url_cluster(s['url']).strip('/')}** hub page "
+            f"**{_short_path(s['url'])}** is one of your strongest pages "
+            f"(PR: {s['pagerank_score'] or 0:.0f}/100) but acts as an equity bottleneck "
+            f"with just {s['outbound_count'] or 0} outbound links. Link it to "
+            f"**{_short_path(t['url'])}** to strengthen your "
+            f"{_url_cluster(t['url']).strip('/')} section."
+        ),
+        lambda s, t: (
+            f"**{_short_path(s['url'])}** ranks in your top "
+            f"{pr_rank_cache.get(s['url'], 50)}% by internal authority but only passes "
+            f"equity to {s['outbound_count'] or 0} pages. Adding a link to the underserved "
+            f"**{_short_path(t['url'])}** would improve its discoverability and distribute "
+            f"link value more efficiently."
+        ),
+        lambda s, t: (
+            f"High-authority page **{_short_path(s['url'])}** "
+            f"(PR: {s['pagerank_score'] or 0:.0f}) is hoarding equity — it receives "
+            f"{s['inbound_count'] or 0} links but sends only {s['outbound_count'] or 0}. "
+            f"Connect it to **{_short_path(t['url'])}** in your "
+            f"{_url_cluster(t['url']).strip('/')} cluster to balance equity flow."
+        ),
+        lambda s, t: (
+            f"Navigation and content pages link heavily to "
+            f"**{_short_path(s['url'])}**, giving it strong authority "
+            f"({s['inbound_count'] or 0} inbound links). But it's a dead end with only "
+            f"{s['outbound_count'] or 0} outbound links. Adding a link to "
+            f"**{_short_path(t['url'])}** would pass some of that accumulated value to a "
+            f"page that needs it."
+        ),
+    ]
+
+    # --- Orphan / weak page boosting templates ---
+    _ORPHAN_TEMPLATES = [
+        lambda s, t: (
+            f"**{_short_path(t['url'])}** is an orphan page with zero internal links "
+            f"pointing to it. Search engines may struggle to discover it. Add a link from "
+            f"**{_short_path(s['url'])}** (one of your strongest pages) to ensure it gets "
+            f"crawled and indexed."
+        ),
+        lambda s, t: (
+            f"**{_short_path(t['url'])}** in your "
+            f"{_url_cluster(t['url']).strip('/')} section has only "
+            f"{t['inbound_count'] or 0} inbound links — well below your site average of "
+            f"{avg_inbound:.0f}. A link from the high-authority "
+            f"**{_short_path(s['url'])}** would significantly boost its visibility."
+        ),
+        lambda s, t: (
+            f"Your {_url_cluster(t['url']).strip('/')} content page "
+            f"**{_short_path(t['url'])}** is essentially invisible to search engines with "
+            f"just {t['inbound_count'] or 0} internal links. **{_short_path(s['url'])}** "
+            f"is a natural linking candidate given its strong authority "
+            f"(PR: {s['pagerank_score'] or 0:.0f}) and related content."
+        ),
+        lambda s, t: (
+            f"**{_short_path(t['url'])}** sits at click depth "
+            f"{t.get('depth') if t.get('depth') is not None else '∞'} with only "
+            f"{t['inbound_count'] or 0} inbound links. Adding a link from "
+            f"**{_short_path(s['url'])}** would shorten the click path and improve crawl "
+            f"efficiency."
+        ),
+        lambda s, t: (
+            f"Content at **{_short_path(t['url'])}** is stranded — "
+            f"{t['inbound_count'] or 0} inbound links means minimal equity flow. "
+            f"**{_short_path(s['url'])}** has authority to spare "
+            f"(PR: {s['pagerank_score'] or 0:.0f}, {s['outbound_count'] or 0} current "
+            f"outlinks). This is a high-impact, low-effort connection."
+        ),
+    ]
+
+    # --- Waster pruning templates ---
+    _WASTER_TEMPLATES = [
+        lambda w: (
+            f"**{_short_path(w['url'])}** has {w['outbound_count'] or 0} outbound links — "
+            f"well above the recommended maximum of 100. Each link passes diminishing "
+            f"equity. Review and remove links to low-priority pages to concentrate "
+            f"authority on your most important content."
+        ),
+        lambda w: (
+            f"With {w['outbound_count'] or 0} outgoing links, "
+            f"**{_short_path(w['url'])}** is spreading its "
+            f"PR: {w['pagerank_score'] or 0:.0f} authority extremely thin. Each link only "
+            f"passes ~{max(0.1, (w['pagerank_score'] or 0) / max(w['outbound_count'] or 1, 1)):.1f} "
+            f"equity. Consider consolidating to your top 50–75 most important link targets."
+        ),
+        lambda w: (
+            f"**{_short_path(w['url'])}** links to {w['outbound_count'] or 0} pages but "
+            f"only receives {w['inbound_count'] or 0} inbound links. It's giving away far "
+            f"more authority than it receives. Audit its outbound links and remove "
+            f"connections to non-essential pages like legal boilerplate, outdated content, "
+            f"or redundant navigation."
+        ),
+    ]
+
+    # Track which template index was last used per strategy to cycle through them
+    hoarder_tmpl_idx = 0
+    orphan_tmpl_idx = 0
+    waster_tmpl_idx = 0
 
     # --- Strategy 1: Hoarder redistribution → Quick Wins ---
     for hoarder in hoarders[:30]:
@@ -367,17 +514,15 @@ def generate_link_recommendations(
         for weak, rel, score in candidates[:5]:
             if len(recommendations) >= max_recommendations:
                 break
-            pr_label = f"PR: {hoarder['pagerank_score'] or 0:.0f}/100"
-            out_label = f"{hoarder['outbound_count'] or 0} outbound links"
+            reason = _HOARDER_TEMPLATES[hoarder_tmpl_idx % len(_HOARDER_TEMPLATES)](hoarder, weak)
+            hoarder_tmpl_idx += 1
             _add_rec(
                 "add_link",
                 "high" if score > 0.5 else "medium",
                 "quick_win",
                 src_url,
                 weak["url"],
-                f"This high-authority page ({pr_label}) has only {out_label}. "
-                f"Adding a link to this underlinked page would distribute equity "
-                f"to content that currently has low internal authority.",
+                reason,
                 rel,
             )
 
@@ -396,15 +541,15 @@ def generate_link_recommendations(
                 best_rel = rel
                 best_src = src
         if best_src:
+            reason = _ORPHAN_TEMPLATES[orphan_tmpl_idx % len(_ORPHAN_TEMPLATES)](best_src, orphan)
+            orphan_tmpl_idx += 1
             _add_rec(
                 "add_link",
                 "high",
                 "strategic",
                 best_src["url"],
                 orphan["url"],
-                f"This page is orphaned (0 internal inbound links) and invisible "
-                f"to search crawlers. Adding a link from a high-authority page "
-                f"would bring it into the site's link graph.",
+                reason,
                 best_rel,
             )
 
@@ -415,16 +560,15 @@ def generate_link_recommendations(
         if len(recommendations) >= max_recommendations:
             break
         if (waster["outbound_count"] or 0) > 30:
+            reason = _WASTER_TEMPLATES[waster_tmpl_idx % len(_WASTER_TEMPLATES)](waster)
+            waster_tmpl_idx += 1
             _add_rec(
                 "review_outlinks",
                 "medium",
                 "maintenance",
                 waster["url"],
                 "",
-                f"This page has {waster['outbound_count'] or 0} outbound links but a low "
-                f"PageRank score of {waster['pagerank_score'] or 0:.0f}/100. Audit and "
-                f"remove low-value outlinks to concentrate link equity on the most "
-                f"important targets.",
+                reason,
                 0.0,
             )
 

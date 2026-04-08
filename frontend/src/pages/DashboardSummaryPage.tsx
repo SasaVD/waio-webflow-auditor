@@ -2,7 +2,32 @@ import { useMemo } from 'react';
 import { useParams, Link } from 'react-router';
 import { motion } from 'framer-motion';
 import { ArrowLeft, FileText, Info, ArrowRightLeft, Shield, CheckCircle2, Brain, Zap } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import { useAuditStore } from '../stores/auditStore';
+
+const mdComponents: Components = {
+  h1: ({ children }) => <h1 className="text-xl font-bold text-text mt-6 mb-3 font-heading">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-lg font-bold text-text mt-6 mb-3 font-heading">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-base font-semibold text-text mt-4 mb-2">{children}</h3>,
+  p: ({ children }) => <p className="text-sm text-text-secondary leading-relaxed mb-3">{children}</p>,
+  strong: ({ children }) => <strong className="font-semibold text-text">{children}</strong>,
+  ul: ({ children }) => <ul className="list-disc pl-5 space-y-1 mb-3 text-sm text-text-secondary">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal pl-5 space-y-1 mb-3 text-sm text-text-secondary">{children}</ol>,
+  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+  table: ({ children }) => (
+    <div className="overflow-x-auto my-4">
+      <table className="w-full border-collapse text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="border-b-2 border-border">{children}</thead>,
+  th: ({ children }) => <th className="text-left p-2 font-semibold text-text text-xs uppercase tracking-wider">{children}</th>,
+  td: ({ children }) => <td className="p-2 border-b border-border/50 text-text-secondary">{children}</td>,
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-accent/40 pl-4 my-3 text-text-secondary italic">{children}</blockquote>
+  ),
+  hr: () => <hr className="border-border my-6" />,
+};
 
 export default function DashboardSummaryPage() {
   const { auditId } = useParams();
@@ -90,8 +115,8 @@ export default function DashboardSummaryPage() {
       >
         {summary ? (
           <div className="bg-surface-raised border border-border rounded-xl p-8">
-            <div className="prose max-w-none text-text text-sm leading-relaxed whitespace-pre-wrap">
-              {summary}
+            <div className="max-w-none">
+              <ReactMarkdown components={mdComponents}>{summary}</ReactMarkdown>
             </div>
           </div>
         ) : (
