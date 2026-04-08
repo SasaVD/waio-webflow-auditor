@@ -224,6 +224,76 @@ export function generateExcel(report: Record<string, any>): void {
     XLSX.utils.book_append_sheet(wb, clusterSheet, 'Topic Clusters');
   }
 
+  // Sheet 8: Link Intelligence (TIPR Analysis)
+  if (report.tipr_analysis) {
+    const tipr = report.tipr_analysis;
+    const s = tipr.summary;
+
+    // Summary sheet
+    const tiprSummary: any[][] = [
+      ['Link Intelligence (TIPR Analysis)'],
+      [''],
+      ['Metric', 'Value'],
+      ['Total Pages', s?.total_pages ?? 0],
+      ['Stars', s?.stars ?? 0],
+      ['Hoarders', s?.hoarders ?? 0],
+      ['Wasters', s?.wasters ?? 0],
+      ['Dead Weight', s?.dead_weight ?? 0],
+      ['Orphan Pages', s?.orphan_count ?? 0],
+      ['Deep Pages (>3 clicks)', s?.deep_pages_count ?? 0],
+    ];
+    const tiprSummarySheet = XLSX.utils.aoa_to_sheet(tiprSummary);
+    tiprSummarySheet['!cols'] = [{ wch: 25 }, { wch: 15 }];
+    XLSX.utils.book_append_sheet(wb, tiprSummarySheet, 'TIPR Summary');
+
+    // Per-page TIPR scores
+    if (tipr.pages?.length) {
+      const tiprPageData: any[][] = [
+        ['URL', 'PageRank Score', 'CheiRank Score', 'TIPR Rank', 'Classification', 'Inbound', 'Outbound', 'Cluster'],
+        ...tipr.pages.slice(0, 500).map((p: any) => [
+          p.url,
+          Math.round(p.pagerank_score ?? 0),
+          Math.round(p.cheirank_score ?? 0),
+          p.tipr_rank ?? 0,
+          p.classification ?? '',
+          p.inbound_count ?? 0,
+          p.outbound_count ?? 0,
+          p.cluster ?? '',
+        ]),
+      ];
+      const tiprPageSheet = XLSX.utils.aoa_to_sheet(tiprPageData);
+      tiprPageSheet['!cols'] = [
+        { wch: 50 }, { wch: 14 }, { wch: 14 }, { wch: 10 },
+        { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 20 },
+      ];
+      XLSX.utils.book_append_sheet(wb, tiprPageSheet, 'TIPR Scores');
+    }
+
+    // Recommendations
+    if (tipr.recommendations?.length) {
+      const recData: any[][] = [
+        ['Priority', 'Group', 'Type', 'Source URL', 'Target URL', 'Reason', 'Expected Impact', 'Source PR', 'Target PR'],
+        ...tipr.recommendations.map((r: any) => [
+          r.priority,
+          r.group,
+          r.type,
+          r.source_url,
+          r.target_url || '',
+          r.reason,
+          r.expected_impact,
+          Math.round(r.source_pr_score ?? 0),
+          Math.round(r.target_pr_score ?? 0),
+        ]),
+      ];
+      const recSheet = XLSX.utils.aoa_to_sheet(recData);
+      recSheet['!cols'] = [
+        { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 45 },
+        { wch: 45 }, { wch: 60 }, { wch: 20 }, { wch: 10 }, { wch: 10 },
+      ];
+      XLSX.utils.book_append_sheet(wb, recSheet, 'Link Recommendations');
+    }
+  }
+
   // Generate file
   const domain = report.url
     ?.replace(/https?:\/\//, '')

@@ -62,6 +62,8 @@ from content_profile_auditor import build_content_profile
 from cms_migration_auditor import run_migration_assessment
 from wdf_idf_auditor import run_wdf_idf_analysis
 from interlinking_auditor import find_interlinking_opportunities
+from tipr_engine import run_tipr_analysis
+from link_data_export import generate_link_data_excel, generate_link_data_csv_zip
 from knowledge_base_generator import generate_knowledge_base, export_jsonl_bytes
 from google_nlp_client import (
     classify_text as nlp_classify_text,
@@ -1117,11 +1119,33 @@ async def _enrich_report_from_crawl(
             homepage_url=homepage_url,
         )
 
+        # Run TIPR analysis on the link graph
+        tipr_analysis = None
+        graph_data = link_analysis.get("graph")
+        if graph_data and graph_data.get("links"):
+            try:
+                # Pull NLP data from existing report for content relevance scoring
+                existing_report = audit_record.get("report_json") or {}
+                nlp_data = existing_report.get("nlp_analysis")
+                tipr_analysis = run_tipr_analysis(
+                    graph_data=graph_data,
+                    nlp_analysis=nlp_data,
+                    max_recommendations=50,
+                )
+                if tipr_analysis:
+                    logger.info(
+                        f"TIPR analysis complete: {tipr_analysis['summary']['total_pages']} pages, "
+                        f"{len(tipr_analysis['recommendations'])} recommendations"
+                    )
+            except Exception as e:
+                logger.warning(f"TIPR analysis failed (non-fatal): {e}", exc_info=True)
+
         # Merge enriched data into the saved report
         report_updates = {
             "crawl_status": "completed",
             "crawl_stats": crawl_stats,
             "link_analysis": link_analysis,
+            "tipr_analysis": tipr_analysis,
             "enrichment_status": "complete",
             "enrichment_progress": "Complete",
         }
@@ -1801,6 +1825,35 @@ async def send_report(request: SendReportRequest):
     except Exception as e:
         logger.error(f"Send report failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to send report: {str(e)}")
+
+@app.get("/api/export/link-data/{audit_id}")
+async def export_link_data(audit_id: str, format: str = "xlsx"):
+    """Export link intelligence data as Excel or CSV ZIP."""
+    audit = await get_audit_by_id(audit_id)
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    report = audit.get("report_json") or {}
+    if not report.get("link_analysis", {}).get("graph", {}).get("nodes"):
+        raise HTTPException(status_code=404, detail="No link graph data available for this audit")
+
+    url = report.get("url", "report")
+    safe_url = url.replace("https://", "").replace("http://", "").replace("/", "_").strip("_")
+
+    if format == "csv":
+        data = generate_link_data_csv_zip(report)
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="WAIO-Link-Data-{safe_url}.zip"'},
+        )
+    else:
+        data = generate_link_data_excel(report)
+        return Response(
+            content=data,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="WAIO-Link-Data-{safe_url}.xlsx"'},
+        )
+
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

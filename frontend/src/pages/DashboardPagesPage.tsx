@@ -42,8 +42,22 @@ const scoreBadgeColor = (score: number): string => {
   return 'text-red-700 bg-red-50 border-red-200';
 };
 
-type SortField = 'url' | 'inbound' | 'outbound' | 'depth';
+type SortField = 'url' | 'inbound' | 'outbound' | 'depth' | 'pr_score' | 'tipr_rank';
 type SortDir = 'asc' | 'desc';
+
+interface TiprPageInfo {
+  pagerank_score: number;
+  cheirank_score: number;
+  tipr_rank: number;
+  classification: string;
+}
+
+const CLASSIFICATION_BADGE: Record<string, string> = {
+  star: 'text-green-700 bg-green-50 border-green-200',
+  hoarder: 'text-amber-700 bg-amber-50 border-amber-200',
+  waster: 'text-red-700 bg-red-50 border-red-200',
+  dead_weight: 'text-gray-600 bg-gray-50 border-gray-200',
+};
 
 export default function DashboardPagesPage() {
   const { auditId } = useParams();
@@ -115,6 +129,23 @@ export default function DashboardPagesPage() {
     return graph.nodes as PageNode[];
   }, [report]);
 
+  const tiprLookup = useMemo(() => {
+    const tipr = report?.tipr_analysis as Record<string, any> | null;
+    if (!tipr?.pages) return new Map<string, TiprPageInfo>();
+    return new Map(
+      (tipr.pages as any[]).map((p: any) => [
+        p.url,
+        {
+          pagerank_score: p.pagerank_score ?? 0,
+          cheirank_score: p.cheirank_score ?? 0,
+          tipr_rank: p.tipr_rank ?? 0,
+          classification: p.classification ?? '',
+        },
+      ])
+    );
+  }, [report]);
+  const hasTipr = tiprLookup.size > 0;
+
   const crawlStats = report?.crawl_stats as Record<string, number> | null;
   const hasData = nodes.length > 0;
 
@@ -149,6 +180,14 @@ export default function DashboardPagesPage() {
           av = a.depth ?? 999;
           bv = b.depth ?? 999;
           break;
+        case 'pr_score':
+          av = tiprLookup.get(a.id)?.pagerank_score ?? -1;
+          bv = tiprLookup.get(b.id)?.pagerank_score ?? -1;
+          break;
+        case 'tipr_rank':
+          av = tiprLookup.get(a.id)?.tipr_rank ?? 99999;
+          bv = tiprLookup.get(b.id)?.tipr_rank ?? 99999;
+          break;
         default:
           return 0;
       }
@@ -157,7 +196,7 @@ export default function DashboardPagesPage() {
       return 0;
     });
     return result;
-  }, [nodes, search, filterOrphans, sortField, sortDir]);
+  }, [nodes, search, filterOrphans, sortField, sortDir, tiprLookup]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -349,6 +388,27 @@ export default function DashboardPagesPage() {
                         <ArrowUpDown size={10} />
                       </button>
                     </th>
+                    {hasTipr && (
+                      <th className="text-center px-3 py-3 text-xs font-bold text-text-muted uppercase tracking-wider hidden lg:table-cell">
+                        <button onClick={() => toggleSort('pr_score')} className="flex items-center gap-1 hover:text-text mx-auto">
+                          PR
+                          <ArrowUpDown size={10} />
+                        </button>
+                      </th>
+                    )}
+                    {hasTipr && (
+                      <th className="text-center px-3 py-3 text-xs font-bold text-text-muted uppercase tracking-wider hidden lg:table-cell">
+                        <button onClick={() => toggleSort('tipr_rank')} className="flex items-center gap-1 hover:text-text mx-auto">
+                          TIPR
+                          <ArrowUpDown size={10} />
+                        </button>
+                      </th>
+                    )}
+                    {hasTipr && (
+                      <th className="text-center px-3 py-3 text-xs font-bold text-text-muted uppercase tracking-wider hidden xl:table-cell">
+                        Type
+                      </th>
+                    )}
                     <th className="text-center px-3 py-3 text-xs font-bold text-text-muted uppercase tracking-wider">
                       Status
                     </th>
@@ -397,6 +457,26 @@ export default function DashboardPagesPage() {
                       <td className="px-3 py-2.5 text-center text-xs text-text-secondary">
                         {node.outbound}
                       </td>
+                      {hasTipr && (() => {
+                        const tp = tiprLookup.get(node.id);
+                        return (
+                          <>
+                            <td className="px-3 py-2.5 text-center text-xs font-semibold text-text hidden lg:table-cell">
+                              {tp ? tp.pagerank_score.toFixed(0) : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-center text-xs text-text-muted hidden lg:table-cell">
+                              {tp ? `#${tp.tipr_rank}` : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-center hidden xl:table-cell">
+                              {tp ? (
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border capitalize ${CLASSIFICATION_BADGE[tp.classification] ?? 'text-gray-600 bg-gray-50 border-gray-200'}`}>
+                                  {tp.classification.replace('_', ' ')}
+                                </span>
+                              ) : '—'}
+                            </td>
+                          </>
+                        );
+                      })()}
                       <td className="px-3 py-2.5 text-center">
                         {node.is_orphan ? (
                           <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">

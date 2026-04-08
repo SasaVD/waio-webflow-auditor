@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useParams, Link } from 'react-router';
 import { motion } from 'framer-motion';
-import { ArrowLeft, FileText, Info, ArrowRightLeft, Shield, CheckCircle2, Brain } from 'lucide-react';
+import { ArrowLeft, FileText, Info, ArrowRightLeft, Shield, CheckCircle2, Brain, Zap } from 'lucide-react';
 import { useAuditStore } from '../stores/auditStore';
 
 export default function DashboardSummaryPage() {
@@ -28,6 +28,23 @@ export default function DashboardSummaryPage() {
       confidence: (data.industry_confidence as number) ?? 0,
       topEntities,
       tone: tone ?? null,
+    };
+  }, [report]);
+
+  const tipr = useMemo(() => {
+    const data = report?.tipr_analysis as Record<string, any> | null;
+    if (!data?.summary) return null;
+    const s = data.summary;
+    const recs = (data.recommendations as any[]) || [];
+    const topRec = recs.find((r: any) => r.priority === 'high' && r.type === 'add_link');
+    return {
+      total: s.total_pages as number,
+      stars: s.stars as number,
+      hoarders: s.hoarders as number,
+      orphans: s.orphan_count as number,
+      healthPct: s.total_pages > 0 ? Math.round((s.stars / s.total_pages) * 100) : 0,
+      topRecSource: topRec?.source_url as string | undefined,
+      topRecTarget: topRec?.target_url as string | undefined,
     };
   }, [report]);
 
@@ -132,6 +149,45 @@ export default function DashboardSummaryPage() {
           </div>
           <Link
             to={`/dashboard/${auditId}/content-intelligence`}
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-accent hover:text-accent-hover transition-colors"
+          >
+            View full analysis →
+          </Link>
+        </motion.div>
+      )}
+
+      {/* Link Intelligence Brief */}
+      {tipr && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.18 }}
+          className="bg-surface-raised border border-border rounded-xl p-6"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Zap size={16} className="text-amber-400" />
+            <h2 className="text-sm font-bold text-text-muted uppercase tracking-widest">
+              Link Intelligence
+            </h2>
+          </div>
+          <div className="space-y-2 text-sm text-text-secondary leading-relaxed">
+            <p>
+              Internal Link Health: <strong className="text-text">{tipr.healthPct}%</strong> of
+              pages are healthy hubs (Stars). <strong className="text-text">{tipr.hoarders}</strong> pages
+              are hoarding equity and <strong className="text-text">{tipr.orphans}</strong> pages are orphaned.
+            </p>
+            {tipr.topRecSource && tipr.topRecTarget && (
+              <p>
+                Top recommendation: Add links from{' '}
+                <strong className="text-text font-mono text-xs">{new URL(tipr.topRecSource.startsWith('http') ? tipr.topRecSource : `https://example.com${tipr.topRecSource}`).pathname}</strong>
+                {' '}to{' '}
+                <strong className="text-text font-mono text-xs">{new URL(tipr.topRecTarget.startsWith('http') ? tipr.topRecTarget : `https://example.com${tipr.topRecTarget}`).pathname}</strong>
+                {' '}to redistribute equity.
+              </p>
+            )}
+          </div>
+          <Link
+            to={`/dashboard/${auditId}/link-intelligence`}
             className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-accent hover:text-accent-hover transition-colors"
           >
             View full analysis →

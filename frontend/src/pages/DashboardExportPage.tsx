@@ -9,6 +9,7 @@ import {
   FileCode2,
   Loader2,
   CheckCircle2,
+  Network,
 } from 'lucide-react';
 import { useAuditStore } from '../stores/auditStore';
 import { generateExcel } from '../utils/generateExcel';
@@ -21,6 +22,10 @@ export default function DashboardExportPage() {
   const [pdfDone, setPdfDone] = useState(false);
   const [excelDone, setExcelDone] = useState(false);
   const [mdDone, setMdDone] = useState(false);
+  const [linkXlsxLoading, setLinkXlsxLoading] = useState(false);
+  const [linkXlsxDone, setLinkXlsxDone] = useState(false);
+  const [linkCsvLoading, setLinkCsvLoading] = useState(false);
+  const [linkCsvDone, setLinkCsvDone] = useState(false);
   const apiBase = import.meta.env.PROD ? '' : 'http://127.0.0.1:8000';
 
   const domain = report?.url
@@ -67,6 +72,36 @@ export default function DashboardExportPage() {
     if (!report) return;
     downloadMarkdown(report);
     setMdDone(true);
+  };
+
+  const hasLinkData = !!(report?.link_analysis?.graph?.nodes?.length);
+
+  const handleLinkExport = async (fmt: 'xlsx' | 'csv') => {
+    if (!auditId) return;
+    const setLoading = fmt === 'xlsx' ? setLinkXlsxLoading : setLinkCsvLoading;
+    const setDone = fmt === 'xlsx' ? setLinkXlsxDone : setLinkCsvDone;
+    setLoading(true);
+    setDone(false);
+    try {
+      const res = await fetch(`${apiBase}/api/export/link-data/${auditId}?format=${fmt}`);
+      if (!res.ok) throw new Error('Link data export failed');
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fmt === 'xlsx'
+        ? `WAIO-Link-Data-${domain}-${date}.xlsx`
+        : `WAIO-Link-Data-${domain}-${date}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+      setDone(true);
+    } catch (err) {
+      console.error('Link data export failed:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const formats = [
@@ -222,6 +257,60 @@ export default function DashboardExportPage() {
           );
         })}
       </div>
+
+      {/* Link Intelligence Data Export */}
+      {hasLinkData && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+        >
+          <div className="bg-surface-raised border border-border rounded-xl p-5">
+            <div className="flex items-start gap-4 mb-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-amber-500/10">
+                <Network size={18} className="text-amber-400" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-text">Link Intelligence Data</div>
+                <div className="text-xs text-text-muted mt-0.5 max-w-md">
+                  Complete internal link data with TIPR scores, recommendations, and edge lists.
+                  Compatible with Google Sheets, Excel, and graph analysis tools like Gephi.
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 ml-14">
+              <button
+                onClick={() => handleLinkExport('xlsx')}
+                disabled={linkXlsxLoading}
+                className="flex items-center gap-2 bg-surface-overlay hover:bg-accent/10 border border-border text-text font-semibold px-4 py-2.5 rounded-xl transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {linkXlsxLoading ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : linkXlsxDone ? (
+                  <CheckCircle2 size={14} className="text-success" />
+                ) : (
+                  <Download size={14} />
+                )}
+                {linkXlsxLoading ? 'Generating...' : linkXlsxDone ? 'Downloaded' : 'Excel (.xlsx)'}
+              </button>
+              <button
+                onClick={() => handleLinkExport('csv')}
+                disabled={linkCsvLoading}
+                className="flex items-center gap-2 bg-surface-overlay hover:bg-accent/10 border border-border text-text font-semibold px-4 py-2.5 rounded-xl transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {linkCsvLoading ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : linkCsvDone ? (
+                  <CheckCircle2 size={14} className="text-success" />
+                ) : (
+                  <Download size={14} />
+                )}
+                {linkCsvLoading ? 'Generating...' : linkCsvDone ? 'Downloaded' : 'CSV (.zip)'}
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 }

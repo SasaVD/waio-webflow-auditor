@@ -62,9 +62,17 @@ interface LinkGraphData {
   }>;
 }
 
+interface TiprPageData {
+  url: string;
+  pagerank_score: number;
+  cheirank_score: number;
+  classification: string;
+}
+
 interface LinkGraphProps {
   auditId: string;
   data?: LinkGraphData | null;
+  tiprPages?: TiprPageData[] | null;
 }
 
 /* ─── Cluster Color Palette ─── */
@@ -113,7 +121,14 @@ function truncateUrl(url: string, maxLen = 30): string {
 
 /* ─── Component ─── */
 
-export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
+const TIPR_COLORS: Record<string, string> = {
+  star: '#22C55E',
+  hoarder: '#F59E0B',
+  waster: '#EF4444',
+  dead_weight: '#6B7280',
+};
+
+export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data, tiprPages }) => {
   const graphRef = useRef<ForceGraphMethods<NodeObject<GraphNode>, LinkObject<GraphNode, GraphLink>>>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -137,11 +152,20 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
   // Filters
   const [filterMode, setFilterMode] = useState<'all' | 'orphans' | 'hubs' | 'depth'>('all');
 
+  // Color-by mode
+  const [colorBy, setColorBy] = useState<'cluster' | 'tipr' | 'pagerank' | 'depth'>('cluster');
+
   // Context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: GraphNode } | null>(null);
 
   const apiBase = import.meta.env.PROD ? '' : 'http://127.0.0.1:8000';
   const graphHeight = expanded ? 700 : 480;
+
+  // Build TIPR lookup
+  const tiprLookup = useMemo(() => {
+    if (!tiprPages) return new Map<string, TiprPageData>();
+    return new Map(tiprPages.map((p) => [p.url, p]));
+  }, [tiprPages]);
 
   // Find homepage node
   const homepageId = useMemo(() => {
@@ -428,19 +452,37 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
     const n = node as GraphNode;
     const inDeg = computedStats?.inDegree;
     const inbound = (inDeg?.get(n.id) ?? 0) || n.inbound || 0;
-    const size = getNodeSize(n, homepageId, inDeg);
+    // Use TIPR PageRank for sizing if available (more accurate than raw inbound count)
+    const tp = tiprLookup.get(n.id);
+    const size = tp
+      ? Math.max(3, Math.min(14, 3 + (tp.pagerank_score / 100) * 11))
+      : getNodeSize(n, homepageId, inDeg);
     const x = node.x ?? 0;
     const y = node.y ?? 0;
     const isOrphan = n.is_orphan || (inbound === 0 && n.id !== homepageId);
     const isHomepage = n.id === homepageId;
 
-    // Determine node color
+    // Determine node color based on colorBy mode
     let color: string;
-    if (isOrphan) {
+    if (isOrphan && colorBy !== 'tipr') {
       color = ORPHAN_COLOR;
-    } else if (filterMode === 'depth' && computedStats?.depths) {
-      const depth = computedStats.depths.get(n.id) ?? 0;
-      const maxD = Math.max(computedStats.maxDepth, 1);
+    } else if (colorBy === 'tipr') {
+      const tp = tiprLookup.get(n.id);
+      color = tp ? (TIPR_COLORS[tp.classification] ?? '#6B7280') : '#6B7280';
+    } else if (colorBy === 'pagerank') {
+      const tp = tiprLookup.get(n.id);
+      if (tp) {
+        const t = Math.min(tp.pagerank_score / 100, 1);
+        const r = Math.round(34 + t * 221);
+        const g = Math.round(211 - t * 90);
+        const b = Math.round(238 - t * 180);
+        color = `rgb(${r},${g},${b})`;
+      } else {
+        color = '#6B7280';
+      }
+    } else if (colorBy === 'depth' || (filterMode === 'depth' && computedStats?.depths)) {
+      const depth = computedStats?.depths?.get(n.id) ?? 0;
+      const maxD = Math.max(computedStats?.maxDepth ?? 1, 1);
       const t = depth / maxD;
       const r = Math.round(99 + t * 100);
       const g = Math.round(102 + t * 100);
@@ -530,7 +572,7 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
     }
 
     ctx.globalAlpha = 1;
-  }, [homepageId, highlightNodes, searchMatches, filterMode, computedStats]);
+  }, [homepageId, highlightNodes, searchMatches, filterMode, computedStats, colorBy, tiprLookup]);
 
   // Pointer area for click detection
   const nodePointerAreaPaint = useCallback((node: NodeObject<GraphNode>, paintColor: string, ctx: CanvasRenderingContext2D) => {
@@ -680,6 +722,19 @@ export const LinkGraph: React.FC<LinkGraphProps> = ({ auditId, data }) => {
               </button>
             ))}
           </div>
+
+          {/* Color-by selector */}
+          <select
+            value={colorBy}
+            onChange={(e) => setColorBy(e.target.value as typeof colorBy)}
+            className="px-2 py-1.5 rounded-lg bg-surface-overlay border border-border text-xs text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent"
+            title="Color nodes by"
+          >
+            <option value="cluster">Color: Cluster</option>
+            <option value="tipr">Color: TIPR Quadrant</option>
+            <option value="pagerank">Color: PageRank</option>
+            <option value="depth">Color: Depth</option>
+          </select>
 
           <button
             onClick={() => setShowOrphans(!showOrphans)}

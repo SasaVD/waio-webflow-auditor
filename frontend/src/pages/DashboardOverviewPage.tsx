@@ -183,6 +183,22 @@ export default function DashboardOverviewPage() {
     return report.migration_assessment as Record<string, unknown>;
   }, [report]);
 
+  // TIPR link intelligence summary
+  const tiprInfo = useMemo(() => {
+    const tipr = report?.tipr_analysis as Record<string, any> | null;
+    if (!tipr?.summary) return null;
+    const s = tipr.summary;
+    return {
+      total: s.total_pages as number,
+      stars: s.stars as number,
+      hoarders: s.hoarders as number,
+      wasters: s.wasters as number,
+      orphans: s.orphan_count as number,
+      recCount: (tipr.recommendations as any[])?.length ?? 0,
+      healthPct: s.total_pages > 0 ? Math.round((s.stars / s.total_pages) * 100) : 0,
+    };
+  }, [report]);
+
   if (!report) {
     return (
       <div className="p-8 text-center">
@@ -470,6 +486,45 @@ export default function DashboardOverviewPage() {
                     <div className="text-[10px] text-text-muted">Tone</div>
                   </div>
                 )}
+                <ChevronRight size={16} className="text-text-muted group-hover:text-accent transition-colors" />
+              </div>
+            </div>
+          </Link>
+        </motion.div>
+      )}
+
+      {/* Link Intelligence (TIPR) Card */}
+      {tiprInfo && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.23 }}
+        >
+          <Link
+            to={`/dashboard/${report.audit_id}/link-intelligence`}
+            className="block bg-surface-raised border border-border rounded-xl p-5 hover:border-accent/30 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center group-hover:bg-amber-500/20 transition-all">
+                  <Zap size={18} className="text-amber-400" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-text">Link Intelligence</h2>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    {tiprInfo.healthPct}% healthy hubs &middot; {tiprInfo.hoarders} hoarders &middot; {tiprInfo.orphans} orphans
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right hidden sm:block">
+                  <div className="text-lg font-bold text-text font-heading">{tiprInfo.recCount}</div>
+                  <div className="text-[10px] text-text-muted">Recommendations</div>
+                </div>
+                <div className="text-right hidden md:block">
+                  <div className="text-lg font-bold text-green-400 font-heading">{tiprInfo.stars}</div>
+                  <div className="text-[10px] text-text-muted">Stars</div>
+                </div>
                 <ChevronRight size={16} className="text-text-muted group-hover:text-accent transition-colors" />
               </div>
             </div>

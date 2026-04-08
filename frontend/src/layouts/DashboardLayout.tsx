@@ -33,6 +33,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 import { PILLAR_LABELS } from '../constants/pillarLabels';
 import { Globe } from 'lucide-react';
@@ -71,6 +72,7 @@ const navGroups: NavGroup[] = [
     label: 'Links & Architecture',
     items: [
       { icon: Link2, label: PILLAR_LABELS.internal_linking, href: 'pillar/content-architecture' },
+      { icon: Sparkles, label: 'Link Intelligence', href: 'link-intelligence' },
       { icon: Network, label: 'Link Graph', href: 'graph' },
       { icon: FolderTree, label: 'Topic Clusters', href: 'clusters' },
     ],

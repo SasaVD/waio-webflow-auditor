@@ -11,6 +11,7 @@ export default function DashboardGraphPage() {
   const enrichment = useEnrichmentPolling(auditId);
 
   const graphData = report?.link_analysis ?? null;
+  const tiprPages = (report?.tipr_analysis as Record<string, any> | null)?.pages ?? null;
   const hasNodes = !!graphData?.graph?.nodes?.length;
 
   const showWaiting = !hasNodes && (enrichment.status === 'polling' || enrichment.status === 'timed_out');
@@ -88,7 +89,7 @@ export default function DashboardGraphPage() {
           </p>
         </motion.div>
       ) : (
-        <LinkGraph auditId={auditId ?? ''} data={graphData} />
+        <LinkGraph auditId={auditId ?? ''} data={graphData} tiprPages={tiprPages} />
       )}
     </div>
   );

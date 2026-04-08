@@ -18,6 +18,8 @@ httpx
 cryptography
 trafilatura
 scikit-learn
+scipy
+openpyxl
 bcrypt
 python-jose[cryptography]
 # force rebuild
