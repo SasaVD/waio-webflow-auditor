@@ -235,7 +235,7 @@ def generate_link_recommendations(
 
     # Build lookup structures
     url_data: dict[str, dict] = {p["url"]: p for p in tipr_pages}
-    max_pr = max((p["pagerank_score"] for p in tipr_pages), default=1) or 1
+    max_pr = max(((p["pagerank_score"] or 0) for p in tipr_pages), default=1) or 1
 
     # Existing edges set (for quick duplicate check)
     existing_edges: set[tuple[str, str]] = set()
@@ -271,16 +271,16 @@ def generate_link_recommendations(
 
     # Identify hoarder sources and weak targets
     hoarders = [p for p in tipr_pages if p["classification"] == QUADRANT_HOARDER]
-    hoarders.sort(key=lambda p: p["pagerank_score"], reverse=True)
+    hoarders.sort(key=lambda p: p["pagerank_score"] or 0, reverse=True)
 
-    weak_pages = [p for p in tipr_pages if p["pagerank_score"] < 30 and p["inbound_count"] < 5]
-    weak_pages.sort(key=lambda p: p["pagerank_score"])
+    weak_pages = [p for p in tipr_pages if (p["pagerank_score"] or 0) < 30 and (p["inbound_count"] or 0) < 5]
+    weak_pages.sort(key=lambda p: p["pagerank_score"] or 0)
 
-    orphans = [p for p in tipr_pages if p["inbound_count"] == 0]
+    orphans = [p for p in tipr_pages if (p["inbound_count"] or 0) == 0]
 
     # Stars can also donate links
     stars = [p for p in tipr_pages if p["classification"] == QUADRANT_STAR]
-    stars.sort(key=lambda p: p["pagerank_score"], reverse=True)
+    stars.sort(key=lambda p: p["pagerank_score"] or 0, reverse=True)
 
     recommendations: list[dict] = []
     source_rec_count: dict[str, int] = defaultdict(int)
@@ -306,9 +306,9 @@ def generate_link_recommendations(
 
         src = url_data.get(source_url, {})
         tgt = url_data.get(target_url, {})
-        src_pr = src.get("pagerank_score", 0)
-        tgt_pr = tgt.get("pagerank_score", 0)
-        src_out = src.get("outbound_count", 0)
+        src_pr = src.get("pagerank_score") or 0
+        tgt_pr = tgt.get("pagerank_score") or 0
+        src_out = src.get("outbound_count") or 0
         delta = max(1, int(src_pr * 0.15))
 
         recommendations.append({
@@ -342,9 +342,9 @@ def generate_link_recommendations(
                 continue
             rel = _content_relevance(src_url, weak["url"])
             # Priority score
-            pr_norm = hoarder["pagerank_score"] / max_pr
-            deficit = 1 - (weak["pagerank_score"] / max_pr)
-            dimret = 1 / (1 + hoarder["outbound_count"] / 50)
+            pr_norm = (hoarder["pagerank_score"] or 0) / max_pr
+            deficit = 1 - ((weak["pagerank_score"] or 0) / max_pr)
+            dimret = 1 / (1 + (hoarder["outbound_count"] or 0) / 50)
             score = 0.40 * pr_norm + 0.25 * deficit + 0.20 * rel + 0.15 * dimret
             candidates.append((weak, rel, score))
 
@@ -352,8 +352,8 @@ def generate_link_recommendations(
         for weak, rel, score in candidates[:5]:
             if len(recommendations) >= max_recommendations:
                 break
-            pr_label = f"PR: {hoarder['pagerank_score']:.0f}/100"
-            out_label = f"{hoarder['outbound_count']} outbound links"
+            pr_label = f"PR: {hoarder['pagerank_score'] or 0:.0f}/100"
+            out_label = f"{hoarder['outbound_count'] or 0} outbound links"
             _add_rec(
                 "add_link",
                 "high" if score > 0.5 else "medium",
@@ -395,19 +395,19 @@ def generate_link_recommendations(
 
     # --- Strategy 3: Waster review → Maintenance ---
     wasters = [p for p in tipr_pages if p["classification"] == QUADRANT_WASTER]
-    wasters.sort(key=lambda p: p["outbound_count"], reverse=True)
+    wasters.sort(key=lambda p: p["outbound_count"] or 0, reverse=True)
     for waster in wasters[:15]:
         if len(recommendations) >= max_recommendations:
             break
-        if waster["outbound_count"] > 30:
+        if (waster["outbound_count"] or 0) > 30:
             _add_rec(
                 "review_outlinks",
                 "medium",
                 "maintenance",
                 waster["url"],
                 "",
-                f"This page has {waster['outbound_count']} outbound links but a low "
-                f"PageRank score of {waster['pagerank_score']:.0f}/100. Audit and "
+                f"This page has {waster['outbound_count'] or 0} outbound links but a low "
+                f"PageRank score of {waster['pagerank_score'] or 0:.0f}/100. Audit and "
                 f"remove low-value outlinks to concentrate link equity on the most "
                 f"important targets.",
                 0.0,
@@ -482,10 +482,13 @@ def run_tipr_analysis(
     node_lookup: dict[str, dict] = {n["id"]: n for n in nodes}
 
     # Assemble per-page TIPR data
+    # NOTE: node fields from DataForSEO can be None even when the key exists,
+    # so dict.get(key, default) is NOT sufficient — use `or 0` to coalesce.
     tipr_pages: list[dict] = []
     for i in range(N):
         url = idx_to_url[i]
         node = node_lookup.get(url, {})
+        raw_depth = node.get("depth")
         tipr_pages.append({
             "url": url,
             "pagerank": float(pr_values[i]),
@@ -495,9 +498,9 @@ def run_tipr_analysis(
             "tipr_rank": int(tipr_ranks[i]),
             "tipr_score": round(float(tipr_ranks[i]), 1),
             "classification": classifications[i],
-            "inbound_count": node.get("inbound", 0),
-            "outbound_count": node.get("outbound", 0),
-            "click_depth": node.get("depth", -1),
+            "inbound_count": node.get("inbound") or 0,
+            "outbound_count": node.get("outbound") or 0,
+            "click_depth": raw_depth if raw_depth is not None else -1,
             "cluster": node.get("cluster") or _url_cluster(url),
         })
 
@@ -509,8 +512,8 @@ def run_tipr_analysis(
     for c in classifications:
         class_counts[c] += 1
 
-    orphan_count = sum(1 for p in tipr_pages if p["inbound_count"] == 0)
-    deep_count = sum(1 for p in tipr_pages if p["click_depth"] > 3)
+    orphan_count = sum(1 for p in tipr_pages if (p["inbound_count"] or 0) == 0)
+    deep_count = sum(1 for p in tipr_pages if (p["click_depth"] or 0) > 3)
 
     max_pr_page = tipr_pages[0] if tipr_pages else {}
     max_cr_idx = int(np.argmax(cr_scores)) if len(cr_scores) > 0 else 0
