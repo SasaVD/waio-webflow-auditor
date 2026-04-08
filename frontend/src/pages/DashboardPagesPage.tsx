@@ -149,6 +149,20 @@ export default function DashboardPagesPage() {
   const crawlStats = report?.crawl_stats as Record<string, number> | null;
   const hasData = nodes.length > 0;
 
+  // Compute link stats from graph data when crawl_stats is missing or zero
+  const linkStats = useMemo(() => {
+    const graphLinks = (report?.link_analysis as Record<string, any>)?.graph?.links;
+    const computedLinkCount = Array.isArray(graphLinks) ? graphLinks.length : 0;
+    const computedBroken = nodes.filter((n) => {
+      const status = (n as Record<string, any>).status_code;
+      return status && status !== 200;
+    }).length;
+    return {
+      internalLinks: crawlStats?.internal_links || computedLinkCount,
+      brokenLinks: crawlStats?.broken_links ?? computedBroken,
+    };
+  }, [report, nodes, crawlStats]);
+
   // Filter and sort
   const filteredNodes = useMemo(() => {
     let result = nodes;
@@ -302,7 +316,7 @@ export default function DashboardPagesPage() {
             </div>
             <div className="bg-surface-raised border border-border rounded-xl p-4 text-center">
               <div className="text-2xl font-bold text-text font-heading">
-                {crawlStats?.internal_links?.toLocaleString() ?? '—'}
+                {linkStats.internalLinks > 0 ? linkStats.internalLinks.toLocaleString() : '—'}
               </div>
               <div className="text-[10px] text-text-muted uppercase tracking-wider mt-1">Internal Links</div>
             </div>
@@ -314,7 +328,7 @@ export default function DashboardPagesPage() {
             </div>
             <div className="bg-surface-raised border border-border rounded-xl p-4 text-center">
               <div className="text-2xl font-bold text-text font-heading">
-                {crawlStats?.broken_links ?? 0}
+                {linkStats.brokenLinks}
               </div>
               <div className="text-[10px] text-text-muted uppercase tracking-wider mt-1">Broken Links</div>
             </div>

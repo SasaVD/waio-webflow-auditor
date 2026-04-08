@@ -650,6 +650,28 @@ async def get_audit_report(audit_id: str):
     # Return the full report JSON directly (same shape the frontend expects)
     report = record["report_json"]
     report["audit_id"] = record["id"]
+
+    # Lazy TIPR computation: if link graph exists but TIPR wasn't computed
+    # (covers audits enriched before TIPR code was deployed)
+    if not report.get("tipr_analysis"):
+        graph_data = (report.get("link_analysis") or {}).get("graph")
+        if graph_data and graph_data.get("links"):
+            try:
+                tipr_result = run_tipr_analysis(
+                    graph_data=graph_data,
+                    nlp_analysis=report.get("nlp_analysis"),
+                    max_recommendations=50,
+                )
+                if tipr_result:
+                    report["tipr_analysis"] = tipr_result
+                    await update_audit_report(audit_id, {"tipr_analysis": tipr_result})
+                    logger.info(
+                        f"Lazy TIPR computed for audit {audit_id}: "
+                        f"{tipr_result['summary']['total_pages']} pages scored"
+                    )
+            except Exception as e:
+                logger.warning(f"Lazy TIPR computation failed for {audit_id}: {e}")
+
     return report
 
 
