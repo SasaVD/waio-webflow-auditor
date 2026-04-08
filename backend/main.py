@@ -675,6 +675,31 @@ async def get_audit_report(audit_id: str):
     return report
 
 
+@app.post("/api/audit/{audit_id}/recompute-tipr")
+async def recompute_tipr(audit_id: str):
+    """One-time admin endpoint: clear cached tipr_analysis so the lazy
+    computation in get_audit_report re-runs with the latest TIPR engine."""
+    record = await get_audit_by_id(audit_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    report = record["report_json"]
+    if "tipr_analysis" not in report:
+        return {"status": "noop", "message": "No cached tipr_analysis to clear"}
+    # Must delete key and write full report back — update_audit_report does a
+    # merge so it can't remove keys.
+    del report["tipr_analysis"]
+    import uuid as _uuid
+    import db_postgres as _db_pg
+    _aid = _uuid.UUID(str(audit_id))
+    pool = await _db_pg.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE audits SET report_json = $1 WHERE id = $2",
+            json.dumps(report), _aid,
+        )
+    return {"status": "cleared", "message": "tipr_analysis removed — will recompute on next load"}
+
+
 @app.get("/api/audit/enrichment-status/{audit_id}")
 async def get_enrichment_status(audit_id: str):
     """Lightweight endpoint to poll enrichment progress.
