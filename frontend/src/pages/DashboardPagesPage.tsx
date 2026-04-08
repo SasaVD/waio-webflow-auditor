@@ -202,6 +202,13 @@ export default function DashboardPagesPage() {
     };
   }, [report, nodes, crawlStats]);
 
+  // Orphan = 0 inbound edges, excluding homepage (matches LinkGraph logic)
+  const isOrphan = (n: PageNode): boolean => {
+    const inbound = inDegreeMap.get(n.id) ?? 0;
+    return inbound === 0 && n.id !== homepageId;
+  };
+  const orphanCount = nodes.filter(isOrphan).length;
+
   // Filter and sort
   const filteredNodes = useMemo(() => {
     let result = nodes;
@@ -259,13 +266,6 @@ export default function DashboardPagesPage() {
       setSortDir('desc');
     }
   };
-
-  // Orphan = 0 inbound edges, excluding homepage (matches LinkGraph logic)
-  const isOrphan = (n: PageNode): boolean => {
-    const inbound = inDegreeMap.get(n.id) ?? 0;
-    return inbound === 0 && n.id !== homepageId;
-  };
-  const orphanCount = nodes.filter(isOrphan).length;
 
   // Extract path from full URL
   const urlPath = (url: string) => {
