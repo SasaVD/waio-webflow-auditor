@@ -335,13 +335,11 @@ function PageTable({
   icon: Icon,
   pages,
   colorKey,
-  auditId,
 }: {
   title: string;
   icon: React.ElementType;
   pages: TiprPage[];
   colorKey: string;
-  auditId: string | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? pages : pages.slice(0, 10);
@@ -840,14 +838,14 @@ export default function DashboardLinkIntelligencePage() {
       {/* Section 3: Top Hoarders */}
       {hoarders.length > 0 && (
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
-          <PageTable title="Top Hoarders" icon={Layers} pages={hoarders} colorKey="hoarder" auditId={auditId} />
+          <PageTable title="Top Hoarders" icon={Layers} pages={hoarders} colorKey="hoarder" />
         </motion.div>
       )}
 
       {/* Section 4: Top Wasters */}
       {wasters.length > 0 && (
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <PageTable title="Top Wasters" icon={AlertTriangle} pages={wasters} colorKey="waster" auditId={auditId} />
+          <PageTable title="Top Wasters" icon={AlertTriangle} pages={wasters} colorKey="waster" />
         </motion.div>
       )}
 
