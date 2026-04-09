@@ -610,12 +610,16 @@ def _generate_cluster_labels(
         top_ents = sorted(ent_dict.items(), key=lambda x: x[1], reverse=True)[:5]
 
         # Combine: prefer entity names (more semantically meaningful), fill with terms
+        # Cap entity names at 4 words to prevent full page titles leaking in
         for ent_name, _sal in top_ents:
             clean = ent_name.strip()
+            words = clean.split()
+            if len(words) > 4:
+                clean = " ".join(words[:4])
             if clean.lower() not in seen_lower and len(clean) > 1:
                 label_parts.append(clean)
                 seen_lower.add(clean.lower())
-            if len(label_parts) >= 3:
+            if len(label_parts) >= 2:
                 break
 
         for term, _score in top_terms:
@@ -623,13 +627,12 @@ def _generate_cluster_labels(
             if clean.lower() not in seen_lower and len(clean) > 2:
                 label_parts.append(clean)
                 seen_lower.add(clean.lower())
-            if len(label_parts) >= 4:
+            if len(label_parts) >= 3:
                 break
 
         # Fallback 1: if no c-TF-IDF labels, try title bigrams
         if not label_parts:
             quality = "medium"
-            # Extract common bigrams from titles in this cluster
             from collections import Counter
             bigram_counts: Counter = Counter()
             stop = {"the", "a", "an", "and", "or", "in", "on", "at", "to", "for",
@@ -640,12 +643,12 @@ def _generate_cluster_labels(
                 for i in range(len(words) - 1):
                     bigram_counts[f"{words[i]} {words[i+1]}"] += 1
 
-            for gram, count in bigram_counts.most_common(4):
+            for gram, count in bigram_counts.most_common(3):
                 if count >= 2 and gram.lower() not in seen_lower:
                     label_parts.append(gram.title())
                     seen_lower.add(gram.lower())
 
-        # Fallback 2: use single significant words from titles
+        # Fallback 2: single significant words from titles (lower threshold)
         if not label_parts:
             from collections import Counter
             word_counts: Counter = Counter()
@@ -656,13 +659,34 @@ def _generate_cluster_labels(
                 for w in re.findall(r"[a-z]+", title.lower()):
                     if w not in stop2 and len(w) > 3:
                         word_counts[w] += 1
-            for word, count in word_counts.most_common(4):
-                if count >= 2 and word not in seen_lower:
+            for word, _count in word_counts.most_common(3):
+                if word not in seen_lower:
                     label_parts.append(word.title())
                     seen_lower.add(word)
 
+        # Fallback 3: URL path segments (last resort before generic)
+        if not label_parts:
+            quality = "low"
+            from collections import Counter
+            seg_counts: Counter = Counter()
+            url_stop = {"www", "com", "org", "net", "html", "htm", "php", "aspx",
+                        "index", "page", "post", "category", "tag", "wp-content"}
+            for page, lbl in zip(pages, labels):
+                if lbl != cluster_idx:
+                    continue
+                path = urlparse(page.get("url", "")).path.strip("/")
+                parts = path.split("/")
+                for seg in parts[:2]:  # top 2 path segments
+                    clean_seg = re.sub(r"[-_]", " ", seg).strip().lower()
+                    if clean_seg and clean_seg not in url_stop and len(clean_seg) > 2:
+                        seg_counts[clean_seg] += 1
+            for seg, _cnt in seg_counts.most_common(2):
+                if seg not in seen_lower:
+                    label_parts.append(seg.title())
+                    seen_lower.add(seg)
+
         if label_parts:
-            results.append((" \u00b7 ".join(label_parts[:4]), quality))
+            results.append((" · ".join(label_parts[:3]), quality))
         else:
             results.append((f"Cluster {cluster_idx}", "low"))
 
@@ -1161,6 +1185,7 @@ def run_topic_clustering(
                 "bidirectional": link_result["bidirectional"],
                 "unlinked": link_result["unlinked"],
                 "health_pct": link_result["health_pct"],
+                "page_details": link_result["page_details"],
             }
             page_details_for_table = link_result["page_details"]
 
@@ -1247,8 +1272,14 @@ def run_topic_clustering(
         c["id"] = i
         c["color"] = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
 
-    # Generate link recommendations
+    # Generate link recommendations (needs page_details in link_health)
     link_recommendations = _generate_link_recommendations(cluster_results, link_index)
+
+    # Strip page_details from link_health to keep stored JSON lean
+    for c in cluster_results:
+        lh = c.get("link_health")
+        if lh and "page_details" in lh:
+            del lh["page_details"]
 
     # Count total missing links
     total_missing_links = sum(
