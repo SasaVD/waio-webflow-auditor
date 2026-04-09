@@ -199,22 +199,51 @@ export function generateMarkdown(report: Record<string, any>): string {
     }
   }
 
-  // Topic Clusters (from DataForSEO link analysis)
-  const clusters = report.link_analysis?.clusters || report.topic_clusters;
-  if (clusters?.length) {
-    lines.push('## Topic Clusters');
+  // Topic Clusters — semantic (preferred) or directory (fallback)
+  const semantic = report.semantic_clusters;
+  if (semantic?.clusters?.length) {
+    lines.push('## Topic Clusters (Semantic)');
     lines.push('');
-    lines.push('| Cluster | Pages | Coherence |');
-    lines.push('|---------|-------|-----------|');
-    for (const cluster of clusters) {
-      const name = cluster.prefix || cluster.name || 'Unknown';
-      const count = cluster.page_count ?? 0;
-      const coherence = cluster.coherence_score != null
-        ? `${Math.round(cluster.coherence_score * 100)}%`
-        : 'N/A';
-      lines.push(`| ${name} | ${count} | ${coherence} |`);
+    lines.push(`*Detection method: ${semantic.detection_method} · Quality: ${semantic.quality} (silhouette ${semantic.silhouette_score}) · Entity data: ${semantic.entity_data_coverage} pages*`);
+    lines.push('');
+    lines.push('| Cluster | Pages | Link Health | Pillar | Content Gaps |');
+    lines.push('|---------|-------|:-----------:|--------|:------------:|');
+    for (const c of semantic.clusters) {
+      const hp = c.link_health?.health_pct != null ? `${c.link_health.health_pct}%` : 'N/A';
+      const pillar = c.pillar?.url ? c.pillar.url : '—';
+      lines.push(`| ${c.label} | ${c.size} | ${hp} | ${pillar} | ${c.content_gaps?.length ?? 0} |`);
     }
     lines.push('');
+    // Top recommendations
+    if (semantic.link_recommendations?.length) {
+      lines.push('### Cluster Link Recommendations');
+      lines.push('');
+      for (const rec of semantic.link_recommendations.slice(0, 20)) {
+        const tag = rec.type === 'missing_pillar_link' ? '→ Pillar' : 'Pillar →';
+        lines.push(`- **[${tag}]** ${rec.reason}`);
+      }
+      if (semantic.link_recommendations.length > 20) {
+        lines.push(`- *...and ${semantic.link_recommendations.length - 20} more recommendations*`);
+      }
+      lines.push('');
+    }
+  } else {
+    const clusters = report.link_analysis?.clusters || report.topic_clusters;
+    if (clusters?.length) {
+      lines.push('## Topic Clusters (Directory)');
+      lines.push('');
+      lines.push('| Directory | Pages | Coherence |');
+      lines.push('|-----------|-------|-----------|');
+      for (const cluster of clusters) {
+        const name = cluster.prefix || cluster.name || 'Unknown';
+        const count = cluster.page_count ?? 0;
+        const coherence = cluster.coherence_score != null
+          ? `${Math.round(cluster.coherence_score * 100)}%`
+          : 'N/A';
+        lines.push(`| ${name} | ${count} | ${coherence} |`);
+      }
+      lines.push('');
+    }
   }
 
   // Link Intelligence (TIPR Analysis)

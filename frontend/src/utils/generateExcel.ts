@@ -207,21 +207,58 @@ export function generateExcel(report: Record<string, any>): void {
     XLSX.utils.book_append_sheet(wb, nlpSheet, 'Content Intelligence');
   }
 
-  // Sheet 7: Topic Clusters (from DataForSEO link analysis)
-  const clusters = report.link_analysis?.clusters || report.topic_clusters;
-  if (clusters?.length) {
-    const clusterData: any[][] = [['Cluster', 'Pages', 'Coherence Score', 'Dominant Category']];
-    for (const cluster of clusters) {
-      clusterData.push([
-        cluster.prefix || cluster.name || '',
-        cluster.page_count ?? 0,
-        cluster.coherence_score != null ? Math.round(cluster.coherence_score * 100) + '%' : 'N/A',
-        cluster.dominant_category || '',
+  // Sheet 7: Semantic Topic Clusters (new) or Directory Clusters (fallback)
+  const semantic = report.semantic_clusters;
+  if (semantic?.clusters?.length) {
+    const scData: any[][] = [
+      ['Semantic Topic Clusters'],
+      ['Method', semantic.detection_method || ''],
+      ['Quality', `${semantic.quality} (silhouette ${semantic.silhouette_score})`],
+      ['Entity Data Coverage', semantic.entity_data_coverage || ''],
+      [''],
+      ['Cluster', 'Pages', 'Link Health %', 'Pillar Page', 'Content Gaps', 'Top Entities'],
+    ];
+    for (const c of semantic.clusters) {
+      scData.push([
+        c.label,
+        c.size,
+        c.link_health?.health_pct != null ? c.link_health.health_pct + '%' : 'N/A',
+        c.pillar?.url || '',
+        c.content_gaps?.length ?? 0,
+        (c.top_entities || []).slice(0, 5).map((e: any) => e[0]).join(', '),
       ]);
     }
-    const clusterSheet = XLSX.utils.aoa_to_sheet(clusterData);
-    clusterSheet['!cols'] = [{ wch: 25 }, { wch: 8 }, { wch: 15 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, clusterSheet, 'Topic Clusters');
+    const scSheet = XLSX.utils.aoa_to_sheet(scData);
+    scSheet['!cols'] = [{ wch: 35 }, { wch: 8 }, { wch: 14 }, { wch: 40 }, { wch: 12 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, scSheet, 'Topic Clusters');
+
+    // Cluster recommendations sheet
+    if (semantic.link_recommendations?.length) {
+      const recData: any[][] = [['Type', 'Source URL', 'Target URL', 'Cluster', 'Reason']];
+      for (const rec of semantic.link_recommendations) {
+        recData.push([rec.type, rec.source_url, rec.target_url, rec.cluster_label, rec.reason]);
+      }
+      const recSheet = XLSX.utils.aoa_to_sheet(recData);
+      recSheet['!cols'] = [{ wch: 22 }, { wch: 40 }, { wch: 40 }, { wch: 30 }, { wch: 60 }];
+      XLSX.utils.book_append_sheet(wb, recSheet, 'Cluster Recommendations');
+    }
+  } else {
+    // Fallback: directory clusters
+    const clusters = report.link_analysis?.clusters || report.topic_clusters;
+    if (clusters?.length) {
+      const clusterData: any[][] = [['Directory', 'Pages', 'Coherence Score', 'Dominant Category']];
+      for (const cluster of clusters) {
+        clusterData.push([
+          cluster.prefix || cluster.name || '',
+          cluster.page_count ?? 0,
+          cluster.coherence_score != null ? Math.round(cluster.coherence_score * 100) + '%' : 'N/A',
+          cluster.dominant_category || '',
+        ]);
+      }
+      const clusterSheet = XLSX.utils.aoa_to_sheet(clusterData);
+      clusterSheet['!cols'] = [{ wch: 25 }, { wch: 8 }, { wch: 15 }, { wch: 40 }];
+      XLSX.utils.book_append_sheet(wb, clusterSheet, 'Topic Clusters');
+    }
   }
 
   // Sheet 8: Link Intelligence (TIPR Analysis)

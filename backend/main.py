@@ -63,6 +63,7 @@ from cms_migration_auditor import run_migration_assessment
 from wdf_idf_auditor import run_wdf_idf_analysis
 from interlinking_auditor import find_interlinking_opportunities
 from tipr_engine import run_tipr_analysis
+from topic_clustering_engine import run_topic_clustering, prepare_pages_from_report
 from link_data_export import generate_link_data_excel, generate_link_data_csv_zip
 from knowledge_base_generator import generate_knowledge_base, export_jsonl_bytes
 from google_nlp_client import (
@@ -672,6 +673,27 @@ async def get_audit_report(audit_id: str):
             except Exception as e:
                 logger.warning(f"Lazy TIPR computation failed for {audit_id}: {e}")
 
+    # Lazy semantic clustering: if link graph exists but clusters weren't computed
+    if not report.get("semantic_clusters"):
+        graph_data = (report.get("link_analysis") or {}).get("graph")
+        if graph_data and graph_data.get("nodes") and len(graph_data["nodes"]) >= 20:
+            try:
+                cluster_pages, cluster_links = prepare_pages_from_report(report)
+                if cluster_pages:
+                    sc_result = run_topic_clustering(
+                        pages=cluster_pages,
+                        links=cluster_links,
+                    )
+                    if sc_result:
+                        report["semantic_clusters"] = sc_result
+                        await update_audit_report(audit_id, {"semantic_clusters": sc_result})
+                        logger.info(
+                            f"Lazy semantic clustering for audit {audit_id}: "
+                            f"{sc_result['n_clusters']} clusters"
+                        )
+            except Exception as e:
+                logger.warning(f"Lazy semantic clustering failed for {audit_id}: {e}")
+
     return report
 
 
@@ -713,11 +735,13 @@ async def get_enrichment_status(audit_id: str):
     link_analysis = report.get("link_analysis") or {}
     has_graph = bool(link_analysis.get("graph", {}).get("nodes"))
     has_clusters = bool(link_analysis.get("clusters"))
+    has_semantic_clusters = bool(report.get("semantic_clusters"))
     return {
         "enrichment_status": report.get("enrichment_status", "complete"),
         "enrichment_progress": report.get("enrichment_progress", ""),
         "has_link_graph": has_graph,
         "has_topic_clusters": has_clusters,
+        "has_semantic_clusters": has_semantic_clusters,
     }
 
 
@@ -1187,12 +1211,35 @@ async def _enrich_report_from_crawl(
             except Exception as e:
                 logger.warning(f"TIPR analysis failed (non-fatal): {e}", exc_info=True)
 
+        # Run semantic topic clustering on the enriched data
+        semantic_clusters = None
+        try:
+            existing_report = audit_record.get("report_json") or {}
+            cluster_pages, cluster_links = prepare_pages_from_report({
+                **existing_report,
+                "link_analysis": link_analysis,
+                "tipr_analysis": tipr_analysis,
+            })
+            if cluster_pages:
+                semantic_clusters = run_topic_clustering(
+                    pages=cluster_pages,
+                    links=cluster_links,
+                )
+                if semantic_clusters:
+                    logger.info(
+                        f"Semantic clustering complete: {semantic_clusters['n_clusters']} clusters, "
+                        f"silhouette={semantic_clusters['silhouette_score']:.3f}"
+                    )
+        except Exception as e:
+            logger.warning(f"Semantic topic clustering failed (non-fatal): {e}", exc_info=True)
+
         # Merge enriched data into the saved report
         report_updates = {
             "crawl_status": "completed",
             "crawl_stats": crawl_stats,
             "link_analysis": link_analysis,
             "tipr_analysis": tipr_analysis,
+            "semantic_clusters": semantic_clusters,
             "enrichment_status": "complete",
             "enrichment_progress": "Complete",
         }

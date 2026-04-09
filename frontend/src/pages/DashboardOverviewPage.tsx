@@ -199,6 +199,26 @@ export default function DashboardOverviewPage() {
     };
   }, [report]);
 
+  const clusterInfo = useMemo(() => {
+    const sc = report?.semantic_clusters as Record<string, any> | null;
+    if (!sc?.clusters?.length) return null;
+    const clusters = sc.clusters as any[];
+    const avgHealth = Math.round(
+      clusters.reduce((s: number, c: any) => s + (c.link_health?.health_pct ?? 0), 0) / clusters.length
+    );
+    const totalGaps = clusters.reduce((s: number, c: any) => s + (c.content_gaps?.length ?? 0), 0);
+    const weakest = [...clusters].sort((a, b) => (a.link_health?.health_pct ?? 0) - (b.link_health?.health_pct ?? 0))[0];
+    return {
+      count: clusters.length,
+      avgHealth,
+      totalGaps,
+      recs: (sc.link_recommendations as any[])?.length ?? 0,
+      weakestLabel: weakest?.label || '',
+      weakestHealth: weakest?.link_health?.health_pct ?? 0,
+      quality: sc.quality as string,
+    };
+  }, [report]);
+
   if (!report) {
     return (
       <div className="p-8 text-center">
@@ -525,6 +545,47 @@ export default function DashboardOverviewPage() {
                   <div className="text-lg font-bold text-green-400 font-heading">{tiprInfo.stars}</div>
                   <div className="text-[10px] text-text-muted">Stars</div>
                 </div>
+                <ChevronRight size={16} className="text-text-muted group-hover:text-accent transition-colors" />
+              </div>
+            </div>
+          </Link>
+        </motion.div>
+      )}
+
+      {/* Topic Clusters Card */}
+      {clusterInfo && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.24 }}
+        >
+          <Link
+            to={`/dashboard/${report.audit_id}/clusters`}
+            className="block bg-surface-raised border border-border rounded-xl p-5 hover:border-accent/30 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-purple-500/10 rounded-xl flex items-center justify-center group-hover:bg-purple-500/20 transition-all">
+                  <Layers size={18} className="text-purple-400" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-text">Topic Clusters</h2>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    {clusterInfo.count} clusters &middot; {clusterInfo.avgHealth}% avg link health &middot; {clusterInfo.totalGaps} content gaps
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right hidden sm:block">
+                  <div className="text-lg font-bold text-text font-heading">{clusterInfo.recs}</div>
+                  <div className="text-[10px] text-text-muted">Recommendations</div>
+                </div>
+                {clusterInfo.weakestLabel && (
+                  <div className="text-right hidden md:block max-w-[140px]">
+                    <div className="text-xs font-semibold text-amber-500 truncate">{clusterInfo.weakestLabel.split(' · ')[0]}</div>
+                    <div className="text-[10px] text-text-muted">Weakest ({clusterInfo.weakestHealth}%)</div>
+                  </div>
+                )}
                 <ChevronRight size={16} className="text-text-muted group-hover:text-accent transition-colors" />
               </div>
             </div>
