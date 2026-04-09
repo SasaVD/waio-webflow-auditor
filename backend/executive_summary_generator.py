@@ -1,7 +1,7 @@
 """
-Executive Summary Generator — Sprint 2A
-Template-based prose with dynamic data insertion. No LLM dependency.
-Produces a Markdown string for inclusion in premium audit reports.
+Executive Summary Generator — Strategic Diagnostic Brief
+Produces a Markdown executive summary grounded in actual audit data.
+No LLM dependency. Every sentence tied to a real finding or score.
 """
 from typing import Dict, Any, List
 
@@ -10,7 +10,7 @@ PILLAR_LABELS: Dict[str, str] = {
     "structured_data": "Structured Data",
     "aeo_content": "AEO Content",
     "css_quality": "CSS Quality",
-    "js_bloat": "JS Bloat",
+    "js_bloat": "JS Performance",
     "accessibility": "Accessibility",
     "rag_readiness": "RAG Readiness",
     "agentic_protocols": "Agentic Protocols",
@@ -18,296 +18,820 @@ PILLAR_LABELS: Dict[str, str] = {
     "internal_linking": "Internal Linking",
 }
 
-# Credibility anchors for ROI projections, keyed by pillar
-ROI_ANCHORS: Dict[str, str] = {
-    "semantic_html": "Pages with proper semantic HTML structure are 2.1x more likely to earn featured snippets (Ahrefs, 2024).",
-    "structured_data": "Websites with structured data see up to 30% higher click-through rates from search (Google Search Central, 2023).",
-    "aeo_content": "Readable text at Flesch-Kincaid Grade 6-8 earns 15% more AI citations (SE Ranking, 2025).",
-    "css_quality": "Reducing CSS bloat can improve Largest Contentful Paint by up to 20%, directly impacting Core Web Vitals scores (web.dev, 2024).",
-    "js_bloat": "Every 100ms reduction in page load time increases conversion rates by 1.11% (Deloitte, 2023).",
-    "accessibility": "Accessible websites reach 15% more users and see 12% higher engagement rates (WebAIM, 2024).",
-    "rag_readiness": "Content structured for RAG extraction is 3x more likely to be cited by AI assistants (Profound Research, 2025).",
-    "agentic_protocols": "Sites with robots.txt AI directives and llms.txt see 40% more consistent AI agent interactions (Anthropic Research, 2025).",
-    "data_integrity": "Consistent NAP data and canonical URLs reduce duplicate content penalties by up to 80% (Moz, 2024).",
-    "internal_linking": "Strategic internal linking improves crawl efficiency by 25% and distributes page authority more evenly (Botify, 2024).",
-}
-
-# Effort estimates per pillar for prioritized action plan
-EFFORT_ESTIMATES: Dict[str, str] = {
-    "semantic_html": "low",
-    "structured_data": "medium",
-    "aeo_content": "medium",
-    "css_quality": "low",
-    "js_bloat": "medium",
-    "accessibility": "high",
-    "rag_readiness": "medium",
-    "agentic_protocols": "low",
-    "data_integrity": "low",
-    "internal_linking": "medium",
-}
-
-IMPACT_WEIGHTS: Dict[str, float] = {
-    "accessibility": 0.18,
+PILLAR_WEIGHTS: Dict[str, float] = {
     "semantic_html": 0.12,
     "structured_data": 0.12,
-    "internal_linking": 0.12,
     "aeo_content": 0.10,
+    "css_quality": 0.05,
+    "js_bloat": 0.05,
+    "accessibility": 0.18,
     "rag_readiness": 0.10,
     "agentic_protocols": 0.08,
     "data_integrity": 0.08,
-    "css_quality": 0.05,
-    "js_bloat": 0.05,
+    "internal_linking": 0.12,
 }
 
-EFFORT_MULTIPLIER = {"low": 1.5, "medium": 1.0, "high": 0.6}
+
+def _get_scores(report: dict) -> Dict[str, int]:
+    """Extract pillar key → score mapping from report categories."""
+    cats = report.get("categories", {})
+    scores: Dict[str, int] = {}
+    for key in PILLAR_LABELS:
+        cat = cats.get(key)
+        if cat:
+            scores[key] = cat.get("score", 0)
+    return scores
 
 
-def generate_executive_summary(report: dict, competitive_data: dict | None = None) -> str:
-    """Generate a Markdown executive summary from a completed audit report."""
-    sections = [
-        _section_overall_assessment(report),
-        _section_strategic_risks(report),
-        _section_strengths(report),
-        _section_roi_projection(report),
-        _section_action_plan(report),
-    ]
-
-    if competitive_data:
-        sections.append(_section_competitor_context(report, competitive_data))
-
-    return "\n\n".join(sections)
-
-
-def _section_overall_assessment(report: dict) -> str:
-    score = report.get("overall_score", 0)
-    label = report.get("overall_label", "N/A")
-    url = report.get("url", "the audited site")
-    summary = report.get("summary", {})
-    total = summary.get("total_findings", 0)
-    crit = summary.get("critical", 0)
-
-    if score >= 90:
-        verdict = f"**{url}** demonstrates excellent optimization across all audit dimensions. The site is well-positioned for AI-era search visibility."
-    elif score >= 75:
-        verdict = f"**{url}** shows solid fundamentals with targeted areas for improvement. Addressing the identified gaps will meaningfully strengthen AI discoverability."
-    elif score >= 55:
-        verdict = f"**{url}** has foundational elements in place but requires focused attention on several pillars to remain competitive in AI-driven search."
-    elif score >= 35:
-        verdict = f"**{url}** has significant optimization gaps that are likely impacting visibility across both traditional and AI search channels."
-    else:
-        verdict = f"**{url}** requires urgent remediation across multiple pillars. The current state poses substantial risk to search visibility and AI discoverability."
-
-    finding_note = ""
-    if crit > 0:
-        finding_note = f" The audit identified **{total} findings** including **{crit} critical issue{'s' if crit != 1 else ''}** requiring immediate attention."
-    elif total > 0:
-        finding_note = f" The audit identified **{total} findings** across the 10 audit pillars."
-
-    return (
-        f"## Overall Assessment\n\n"
-        f"**Score: {score}/100 ({label})**\n\n"
-        f"{verdict}{finding_note}"
+def _weak(scores: Dict[str, int], threshold: int = 65) -> List[str]:
+    """Return pillar keys scoring below threshold, sorted weakest first."""
+    return sorted(
+        [k for k, v in scores.items() if v < threshold],
+        key=lambda k: scores[k],
     )
 
 
-def _section_strategic_risks(report: dict) -> str:
-    categories = report.get("categories", {})
+def _strong(scores: Dict[str, int], threshold: int = 75) -> List[str]:
+    """Return pillar keys scoring at or above threshold, sorted strongest first."""
+    return sorted(
+        [k for k, v in scores.items() if v >= threshold],
+        key=lambda k: -scores[k],
+    )
 
-    # Collect all findings with their pillar context
-    all_findings: List[Dict[str, Any]] = []
-    for pillar_key, pillar_data in categories.items():
+
+def _avg(*values: int) -> int:
+    """Average of integers, rounded."""
+    valid = [v for v in values if v is not None]
+    return round(sum(valid) / len(valid)) if valid else 0
+
+
+def _interp(score: int) -> str:
+    """One-phrase score interpretation."""
+    if score >= 80:
+        return "Strong — minor refinements available"
+    if score >= 65:
+        return "Solid base, targeted improvements needed"
+    if score >= 45:
+        return "Developing — significant opportunity for improvement"
+    if score >= 25:
+        return "Foundational gaps requiring focused attention"
+    return "Critical gaps limiting site performance"
+
+
+def _get_tipr(report: dict) -> dict | None:
+    """Extract TIPR summary if available."""
+    tipr = report.get("tipr_analysis")
+    if not tipr or not tipr.get("summary"):
+        return None
+    return tipr
+
+
+def _get_nlp(report: dict) -> dict | None:
+    """Extract NLP analysis if available."""
+    nlp = report.get("nlp_analysis")
+    if not nlp:
+        return None
+    return nlp
+
+
+def _get_clusters(report: dict) -> dict | None:
+    """Extract semantic clusters if available."""
+    sc = report.get("semantic_clusters")
+    if not sc or not sc.get("clusters"):
+        return None
+    return sc
+
+
+def _collect_findings(report: dict) -> List[Dict[str, Any]]:
+    """Collect all findings from audit categories, sorted by severity."""
+    findings: List[Dict[str, Any]] = []
+    for pillar_key, pillar_data in report.get("categories", {}).items():
         checks = pillar_data.get("checks", {})
-        for check_name, check_data in checks.items():
-            if not isinstance(check_data, dict):
-                continue
-            for finding in check_data.get("findings", []):
-                all_findings.append({
-                    **finding,
-                    "pillar": PILLAR_LABELS.get(pillar_key, pillar_key),
-                    "pillar_key": pillar_key,
-                })
-
-    # Sort by severity: critical > high > medium
-    severity_order = {"critical": 0, "high": 1, "medium": 2}
-    all_findings.sort(key=lambda f: severity_order.get(f.get("severity", "medium"), 3))
-
-    if not all_findings:
-        return "## Top Strategic Risks\n\nNo significant risks were identified. Your site is performing well across all audit pillars."
-
-    top_risks = all_findings[:3]
-    lines = ["## Top Strategic Risks\n"]
-    for i, risk in enumerate(top_risks, 1):
-        sev = risk.get("severity", "medium").upper()
-        pillar = risk.get("pillar", "Unknown")
-        desc = risk.get("description", "")
-        anchor = risk.get("credibility_anchor", risk.get("why_it_matters", ""))
-        lines.append(f"**{i}. [{sev}] {pillar}:** {desc}")
-        if anchor:
-            lines.append(f"   *{anchor}*")
-        lines.append("")
-
-    return "\n".join(lines).rstrip()
-
-
-def _section_strengths(report: dict) -> str:
-    positives = report.get("positive_findings", [])
-    categories = report.get("categories", {})
-
-    # Find top-scoring pillars
-    pillar_scores: List[tuple[str, int, str]] = []
-    for key, data in categories.items():
-        pillar_scores.append((key, data.get("score", 0), data.get("label", "N/A")))
-    pillar_scores.sort(key=lambda x: x[1], reverse=True)
-
-    top_pillars = [p for p in pillar_scores if p[1] >= 75][:3]
-
-    if not top_pillars and not positives:
-        return "## Top Strengths\n\nNo strong-performing areas were identified. Focus on the action plan below to build foundational strengths."
-
-    lines = ["## Top Strengths\n"]
-    for i, (key, score, label) in enumerate(top_pillars, 1):
-        pillar_name = PILLAR_LABELS.get(key, key)
-        anchor = ROI_ANCHORS.get(key, "")
-        lines.append(f"**{i}. {pillar_name} — {score}/100 ({label})**")
-        if anchor:
-            lines.append(f"   *{anchor}*")
-        lines.append("")
-
-    # Add notable positive findings if we have fewer than 3 pillars
-    if len(top_pillars) < 3 and positives:
-        remaining = 3 - len(top_pillars)
-        for pos in positives[:remaining]:
-            if isinstance(pos, str):
-                lines.append(f"- {pos}")
-
-    return "\n".join(lines).rstrip()
-
-
-def _section_roi_projection(report: dict) -> str:
-    categories = report.get("categories", {})
-
-    # Find the 3 weakest pillars with the most room for improvement
-    weak_pillars: List[tuple[str, int]] = []
-    for key, data in categories.items():
-        score = data.get("score", 100)
-        if score < 75:
-            weak_pillars.append((key, score))
-    weak_pillars.sort(key=lambda x: x[1])
-
-    if not weak_pillars:
-        return (
-            "## ROI Projection\n\n"
-            "Your site already performs well across all pillars. "
-            "Continued optimization will help maintain your competitive edge as AI search evolves."
-        )
-
-    top3_weak = weak_pillars[:3]
-    potential_gain = sum(
-        int((75 - score) * IMPACT_WEIGHTS.get(key, 0.05))
-        for key, score in top3_weak
-    )
-    potential_gain = max(potential_gain, 3)  # minimum meaningful projection
-
-    lines = [
-        "## ROI Projection\n",
-        f"Addressing the top {len(top3_weak)} underperforming pillar{'s' if len(top3_weak) > 1 else ''} could improve your overall audit score by an estimated **+{potential_gain} points**.\n",
-    ]
-
-    for key, score in top3_weak:
-        label = PILLAR_LABELS.get(key, key)
-        anchor = ROI_ANCHORS.get(key, "")
-        lines.append(f"- **{label}** (currently {score}/100): {anchor}")
-
-    return "\n".join(lines).rstrip()
-
-
-def _section_action_plan(report: dict) -> str:
-    categories = report.get("categories", {})
-
-    # Build action items from underperforming pillars, prioritized by impact * effort
-    actions: List[Dict[str, Any]] = []
-    for key, data in categories.items():
-        score = data.get("score", 100)
-        if score >= 90:
-            continue  # already excellent, skip
-        gap = 100 - score
-        effort = EFFORT_ESTIMATES.get(key, "medium")
-        impact = IMPACT_WEIGHTS.get(key, 0.05)
-        priority_score = gap * impact * EFFORT_MULTIPLIER.get(effort, 1.0)
-
-        # Get the top finding recommendation for this pillar
-        top_rec = ""
-        checks = data.get("checks", {})
         for check_data in checks.values():
             if not isinstance(check_data, dict):
                 continue
-            for finding in check_data.get("findings", []):
-                if finding.get("recommendation"):
-                    top_rec = finding["recommendation"]
-                    break
-            if top_rec:
-                break
+            for f in check_data.get("findings", []):
+                findings.append({**f, "pillar_key": pillar_key})
+    severity_order = {"critical": 0, "high": 1, "medium": 2}
+    findings.sort(key=lambda f: severity_order.get(f.get("severity", "medium"), 3))
+    return findings
 
-        actions.append({
-            "pillar_key": key,
-            "pillar": PILLAR_LABELS.get(key, key),
-            "score": score,
-            "effort": effort,
-            "priority_score": priority_score,
-            "recommendation": top_rec,
-        })
 
-    actions.sort(key=lambda a: a["priority_score"], reverse=True)
+# ─── Section generators ───
 
-    if not actions:
-        return "## Prioritized Action Plan\n\nAll pillars are performing at an excellent level. Continue monitoring for regressions."
 
-    lines = ["## Prioritized Action Plan\n"]
-    lines.append("| Priority | Pillar | Score | Effort | Action |")
-    lines.append("|----------|--------|-------|--------|--------|")
+def _section_strategic_context(report: dict, scores: Dict[str, int]) -> str:
+    """Section 1: Outcome-first business framing. 2–3 sentences."""
+    url = report.get("url", "this site")
+    overall = report.get("overall_score", 0)
+    nlp = _get_nlp(report)
 
-    for i, action in enumerate(actions[:8], 1):
-        effort_label = {"low": "Easy", "medium": "Moderate", "high": "Involved"}.get(action["effort"], "Moderate")
-        rec = action["recommendation"][:120] + "..." if len(action.get("recommendation", "")) > 120 else action.get("recommendation", "Review this pillar")
-        lines.append(f"| {i} | {action['pillar']} | {action['score']}/100 | {effort_label} | {rec} |")
+    # Identify the primary growth levers based on what's weak
+    gaps: List[str] = []
+    if scores.get("structured_data", 100) < 65 or scores.get("semantic_html", 100) < 65:
+        gaps.append("how search engines discover and present this site in results")
+    if scores.get("aeo_content", 100) < 65 or scores.get("rag_readiness", 100) < 65:
+        gaps.append("visibility in AI-generated answers and recommendations")
+    if scores.get("internal_linking", 100) < 65:
+        gaps.append("how effectively the site's own content drives visitors toward key pages")
+    if scores.get("accessibility", 100) < 65:
+        gaps.append("the breadth of audience the site can reach")
+    if nlp and nlp.get("entities") and len(nlp.get("entities", [])) < 5:
+        gaps.append("the range of topics Google associates with this domain")
+
+    lines = ["## Strategic Context\n"]
+
+    if overall >= 75 and len(gaps) <= 1:
+        lines.append(
+            f"**{url}** has a strong technical foundation across most audit dimensions. "
+            f"The primary opportunity is refinement rather than remediation — "
+            f"targeted improvements in {gaps[0] if gaps else 'a few specific areas'} "
+            f"would further strengthen the site's competitive position."
+        )
+    elif gaps:
+        opening = (
+            f"This audit identifies specific gaps in {gaps[0]}"
+            + (f" and {gaps[1]}" if len(gaps) > 1 else "")
+            + f" for **{url}**."
+        )
+        lines.append(opening)
+        lines.append(
+            "Addressing these would improve the quality of organic traffic, "
+            "reduce reliance on paid channels, and position the site for visibility "
+            "in AI-generated recommendations — an increasingly significant source of "
+            "qualified discovery."
+        )
+    else:
+        lines.append(
+            f"**{url}** demonstrates solid optimization across the audit dimensions. "
+            f"The opportunities identified below are refinements that would "
+            f"further strengthen search visibility and AI discoverability."
+        )
 
     return "\n".join(lines)
 
 
-def _section_competitor_context(report: dict, competitive_data: dict) -> str:
-    primary = competitive_data.get("primary", {})
+def _section_roi_projection(report: dict, scores: Dict[str, int]) -> str:
+    """Section 2: Data-grounded business case with conservative projections."""
+    overall = report.get("overall_score", 0)
+    crawl_stats = report.get("crawl_stats")
+    page_count = crawl_stats.get("pages_crawled", 0) if crawl_stats else 0
+    weak_keys = _weak(scores)
+
+    if not weak_keys:
+        return (
+            "## Business Case\n\n"
+            "All pillars are performing above threshold. Continued optimization "
+            "will help maintain competitive position as AI search evolves."
+        )
+
+    lines = ["## Business Case\n"]
+
+    # Baseline context
+    baseline_parts = [f"an overall score of {overall}/100"]
+    if page_count > 0:
+        baseline_parts.append(f"{page_count:,} pages crawled")
+    baseline_parts.append(f"{len(weak_keys)} pillars below target threshold")
+    lines.append(
+        f"Based on a current baseline of {', '.join(baseline_parts)}, "
+        f"the following projections are modeled — not guaranteed — and are "
+        f"contingent on implementation scope and timeline.\n"
+    )
+
+    # Traffic growth range
+    if overall < 40:
+        traffic_range = "30–60%"
+    elif overall < 65:
+        traffic_range = "15–35%"
+    else:
+        traffic_range = "5–15%"
+    lines.append(
+        f"- **Organic traffic growth potential:** {traffic_range} improvement range, "
+        f"contingent on implementation scope and timeline"
+    )
+
+    # Lead/pipeline impact — only for sites with enough pages
+    if page_count > 50:
+        lines.append(
+            f"- **Pipeline impact:** If organic traffic increases by {traffic_range}, "
+            f"and current conversion rates hold, this represents a proportional "
+            f"increase in monthly inquiries from organic channels"
+        )
+
+    # Efficiency gains
+    js_score = scores.get("js_bloat", 100)
+    data_score = scores.get("data_integrity", 100)
+    a11y_score = scores.get("accessibility", 100)
+    if js_score < 65 or data_score < 65:
+        parts = []
+        if js_score < 65:
+            parts.append("reduced wasted crawl budget from performance improvements")
+        if data_score < 65:
+            parts.append("more accurate analytics data for decision-making")
+        lines.append(f"- **Efficiency gains:** {' and '.join(parts)}")
+    if a11y_score < 65:
+        lines.append(
+            "- **Audience expansion:** Accessibility improvements would extend "
+            "reach to users who rely on assistive technologies"
+        )
+
+    return "\n".join(lines)
+
+
+def _section_diagnosis(report: dict, scores: Dict[str, int]) -> str:
+    """Section 3: Core diagnostic statements drawn from actual scores and data."""
+    overall = report.get("overall_score", 0)
+    tipr = _get_tipr(report)
+    nlp = _get_nlp(report)
+    clusters = _get_clusters(report)
+
+    lines = ["## Audit Diagnosis\n"]
+
+    # If high-scoring, lead with strengths
+    strong_keys = _strong(scores)
+    if overall >= 75 and strong_keys:
+        top_names = [PILLAR_LABELS.get(k, k) for k in strong_keys[:3]]
+        lines.append(
+            f"The site demonstrates strong fundamentals across "
+            f"{', '.join(top_names)}. "
+            f"The primary opportunities lie in the areas noted below.\n"
+        )
+
+    statements: List[str] = []
+
+    sem_score = scores.get("semantic_html", 100)
+    if sem_score < 65:
+        if sem_score < 40:
+            level = "a weak"
+        elif sem_score < 55:
+            level = "a developing"
+        else:
+            level = "a partial"
+        statements.append(
+            f"The site has {level} technical foundation — key signals that help search engines "
+            f"and AI systems interpret content hierarchy and page purpose are incomplete."
+        )
+
+    sd_score = scores.get("structured_data", 100)
+    if sd_score < 65:
+        if sd_score < 30:
+            word = "missing"
+        elif sd_score < 50:
+            word = "incomplete"
+        else:
+            word = "inconsistent"
+        statements.append(
+            f"Structured data implementation is {word}, limiting how search engines "
+            f"display the site in rich results and reducing click-through rates from search."
+        )
+
+    aeo_score = scores.get("aeo_content", 100)
+    rag_score = scores.get("rag_readiness", 100)
+    if aeo_score < 65 and rag_score < 65:
+        statements.append(
+            "AI visibility is limited — content formatting and structured signals don't "
+            "meet the patterns that AI systems use when selecting sources for generated answers."
+        )
+    elif aeo_score < 65:
+        statements.append(
+            "Content is reasonably well-structured for AI extraction, but lacks the "
+            "answer-oriented formatting that drives inclusion in AI-generated responses."
+        )
+
+    il_score = scores.get("internal_linking", 100)
+    if il_score < 65:
+        statements.append(
+            "Internal link structure does not clearly guide authority or user flow toward "
+            "the site's most important pages, diluting the impact of existing content."
+        )
+
+    a11y_score = scores.get("accessibility", 100)
+    if a11y_score < 65:
+        statements.append(
+            "Accessibility gaps limit the site's reach to users with assistive technologies "
+            "and create compliance risk, while also signaling reduced content quality to search engines."
+        )
+
+    # TIPR-derived statements
+    if tipr:
+        s = tipr.get("summary", {})
+        total_pages = s.get("total_pages", 0)
+        orphan_count = s.get("orphan_count", 0)
+        hoarder_count = s.get("hoarders", 0)
+
+        if total_pages > 0 and orphan_count > 0:
+            orphan_pct = round(orphan_count / total_pages * 100)
+            if orphan_pct >= 10:
+                statements.append(
+                    f"{orphan_pct}% of crawled pages ({orphan_count} pages) have no internal links "
+                    f"pointing to them, making them invisible to both search crawlers and "
+                    f"users navigating the site."
+                )
+
+        if total_pages > 0 and hoarder_count > 0:
+            hoarder_pct = round(hoarder_count / total_pages * 100)
+            if hoarder_pct >= 20:
+                statements.append(
+                    f"A significant portion of pages ({hoarder_pct}%) accumulate link authority "
+                    f"without distributing it, creating bottlenecks that prevent deeper "
+                    f"content from ranking."
+                )
+
+    # NLP sentiment
+    if nlp:
+        sentiment = nlp.get("sentiment", {})
+        magnitude = sentiment.get("magnitude", 0)
+        sent_score = sentiment.get("score", 0)
+        if magnitude > 1.5 and sent_score < -0.2:
+            statements.append(
+                "Content tone is inconsistent, with sections that may undermine "
+                "trust signals that both users and AI systems rely on."
+            )
+
+    # Cluster content gaps
+    if clusters:
+        total_gaps = sum(
+            len(c.get("content_gaps", []))
+            for c in clusters.get("clusters", [])
+        )
+        if total_gaps > 0:
+            statements.append(
+                f"Topic coverage has gaps — {total_gaps} content areas identified by "
+                f"the audit lack dedicated pages, representing missed opportunities "
+                f"for topical authority."
+            )
+
+    # Limit to 4 most impactful statements
+    for stmt in statements[:4]:
+        lines.append(stmt)
+        lines.append("")
+
+    if not statements:
+        lines.append(
+            "No significant structural issues were identified. "
+            "The site is well-positioned across the audited dimensions."
+        )
+
+    return "\n".join(lines).rstrip()
+
+
+def _section_key_risks(report: dict, scores: Dict[str, int]) -> str:
+    """Section 4: 3 specific risk statements tied to the diagnosis."""
+    tipr = _get_tipr(report)
+    clusters = _get_clusters(report)
+
+    risks: List[str] = []
+
+    # Technical visibility risk
+    sem = scores.get("semantic_html", 100)
+    sd = scores.get("structured_data", 100)
+    if sem < 65 or sd < 65:
+        risks.append(
+            "Reduced visibility for high-value search queries where competitors "
+            "with better technical signals are preferred"
+        )
+
+    # AI presence risk
+    aeo = scores.get("aeo_content", 100)
+    rag = scores.get("rag_readiness", 100)
+    if aeo < 65 or rag < 65:
+        risks.append(
+            "Low presence in AI-generated answers, an area where early movers "
+            "are establishing lasting advantage"
+        )
+
+    # Internal linking risk
+    il = scores.get("internal_linking", 100)
+    if il < 65:
+        risks.append(
+            "Existing content assets underperforming because link authority "
+            "is not reaching them"
+        )
+
+    # Orphan pages risk
+    if tipr:
+        s = tipr.get("summary", {})
+        orphans = s.get("orphan_count", 0)
+        if orphans > 0:
+            risks.append(
+                f"{orphans} pages that cost resources to create are currently "
+                f"generating zero organic traffic due to missing internal links"
+            )
+
+    # Accessibility risk
+    a11y = scores.get("accessibility", 100)
+    if a11y < 65:
+        risks.append(
+            "Potential compliance exposure and exclusion of users who rely on "
+            "assistive technologies"
+        )
+
+    # Content gaps risk
+    if clusters:
+        total_gaps = sum(
+            len(c.get("content_gaps", []))
+            for c in clusters.get("clusters", [])
+        )
+        if total_gaps > 0:
+            risks.append(
+                f"Competitors capturing demand for {total_gaps} topic areas "
+                f"where this site has no content presence"
+            )
+
+    if not risks:
+        return ""  # Skip section entirely for high-scoring sites
+
+    lines = ["## Key Risks\n"]
+    for risk in risks[:3]:
+        lines.append(f"- {risk}")
+
+    return "\n".join(lines)
+
+
+def _section_scorecard(scores: Dict[str, int]) -> str:
+    """Section 5: Composite category scorecard table."""
+    sem = scores.get("semantic_html", 0)
+    sd = scores.get("structured_data", 0)
+    js = scores.get("js_bloat", 0)
+    aeo = scores.get("aeo_content", 0)
+    rag = scores.get("rag_readiness", 0)
+    agent = scores.get("agentic_protocols", 0)
+    il = scores.get("internal_linking", 0)
+    a11y = scores.get("accessibility", 0)
+    data = scores.get("data_integrity", 0)
+
+    tech = _avg(sem, sd, js)
+    content = _avg(aeo, rag)
+    ai = _avg(aeo, rag, agent)
+    structure = _avg(il, a11y, data)
+
+    lines = [
+        "## Current State\n",
+        "| Category | Score | Assessment |",
+        "|----------|:-----:|------------|",
+        f"| Technical Foundation | {tech} | {_interp(tech)} |",
+        f"| Content Effectiveness | {content} | {_interp(content)} |",
+        f"| AI Readiness | {ai} | {_interp(ai)} |",
+        f"| Site Structure | {structure} | {_interp(structure)} |",
+    ]
+
+    return "\n".join(lines)
+
+
+def _section_priority_actions(
+    report: dict, scores: Dict[str, int]
+) -> str:
+    """Section 6: 4–5 specific action items for areas below 65."""
+    tipr = _get_tipr(report)
+    clusters = _get_clusters(report)
+    cms = (report.get("cms_detection") or {}).get("platform", "unknown")
+    is_webflow = cms == "webflow"
+
+    actions: List[str] = []
+
+    if scores.get("semantic_html", 100) < 65:
+        if is_webflow:
+            actions.append(
+                "Add missing heading hierarchy and semantic elements using Webflow's "
+                "tag settings to improve how search engines interpret page structure"
+            )
+        else:
+            actions.append(
+                "Add missing heading hierarchy and semantic HTML signals "
+                "to improve how search engines interpret page structure"
+            )
+
+    if scores.get("structured_data", 100) < 65:
+        if is_webflow:
+            actions.append(
+                "Implement structured data markup using Webflow Collection fields "
+                "and custom code embeds to enable rich search results"
+            )
+        else:
+            actions.append(
+                "Implement structured data markup (Schema.org) for key page types "
+                "to enable rich search results"
+            )
+
+    if scores.get("aeo_content", 100) < 65:
+        actions.append(
+            "Rework core content pages to include direct-answer formatting "
+            "that AI systems prioritize for citation"
+        )
+
+    if scores.get("rag_readiness", 100) < 65:
+        actions.append(
+            "Improve content structure with clear sections, summaries, and "
+            "entity-rich text that AI retrieval systems can extract"
+        )
+
+    if scores.get("internal_linking", 100) < 65:
+        action = "Restructure internal links to direct authority toward high-priority pages"
+        if tipr:
+            top_hoarders = tipr.get("summary", {}).get("top_hoarders", [])
+            if top_hoarders:
+                action += " — starting with pages that hold disproportionate link equity"
+        actions.append(action)
+
+    if scores.get("accessibility", 100) < 65:
+        # Pull top 2 specific a11y findings
+        a11y_findings = []
+        a11y_cat = report.get("categories", {}).get("accessibility", {})
+        for chk in a11y_cat.get("checks", {}).values():
+            if isinstance(chk, dict):
+                for f in chk.get("findings", []):
+                    if f.get("severity") in ("critical", "high"):
+                        desc = f.get("description", "")
+                        if len(desc) > 60:
+                            desc = desc[:57] + "..."
+                        a11y_findings.append(desc)
+        if a11y_findings:
+            specifics = " and ".join(a11y_findings[:2])
+            actions.append(
+                f"Address accessibility gaps including {specifics} "
+                f"to expand audience reach"
+            )
+        else:
+            actions.append(
+                "Address accessibility gaps to expand audience reach and "
+                "reduce compliance risk"
+            )
+
+    if scores.get("agentic_protocols", 100) < 65:
+        actions.append(
+            "Add AI agent compatibility signals (robots.txt AI directives, "
+            "llms.txt, structured API endpoints) to improve automated discovery"
+        )
+
+    if scores.get("data_integrity", 100) < 65:
+        actions.append(
+            "Fix tracking implementation gaps to ensure analytics data "
+            "accurately reflects site performance"
+        )
+
+    # TIPR-derived actions
+    if tipr:
+        rec_count = len(tipr.get("recommendations", []))
+        if rec_count > 0:
+            # Find dominant recommendation group
+            groups: Dict[str, int] = {}
+            for r in tipr.get("recommendations", []):
+                g = r.get("group", "general")
+                groups[g] = groups.get(g, 0) + 1
+            top_group = max(groups, key=groups.get) if groups else "general"
+            actions.append(
+                f"Implement {rec_count} internal link changes identified by link "
+                f"intelligence analysis, prioritizing {top_group.replace('_', ' ')} actions"
+            )
+
+    # Cluster gap actions
+    if clusters:
+        total_gaps = sum(
+            len(c.get("content_gaps", []))
+            for c in clusters.get("clusters", [])
+        )
+        if total_gaps > 0:
+            actions.append(
+                f"Create content for {total_gaps} identified topic gaps to "
+                f"establish authority in uncovered service areas"
+            )
+
+    if not actions:
+        return (
+            "## Priority Actions\n\n"
+            "All pillars are performing above threshold. Continue monitoring "
+            "for regressions and refine based on competitive movement."
+        )
+
+    lines = ["## Priority Actions\n"]
+    for action in actions[:5]:
+        lines.append(f"- {action}")
+
+    return "\n".join(lines)
+
+
+def _section_opportunities(report: dict, scores: Dict[str, int]) -> str:
+    """Section 7: Forward-looking strategic opportunities."""
+    tipr = _get_tipr(report)
+    nlp = _get_nlp(report)
+    clusters = _get_clusters(report)
+    cms = (report.get("cms_detection") or {}).get("platform", "unknown")
+
+    opps: List[str] = []
+
+    # Cluster expansion
+    if clusters:
+        total_gaps = sum(
+            len(c.get("content_gaps", []))
+            for c in clusters.get("clusters", [])
+        )
+        if total_gaps > 0:
+            opps.append(
+                f"Expand into {total_gaps} high-intent topic areas identified by "
+                f"semantic analysis where the site currently has no content presence"
+            )
+
+    # Amplify Stars
+    if tipr:
+        stars = tipr.get("summary", {}).get("stars", 0)
+        if stars > 0:
+            opps.append(
+                f"Amplify the {stars} pages already performing well (classified as "
+                f"'Star' pages) by building more internal links to them from related content"
+            )
+
+    # AI visibility opportunity
+    aeo = scores.get("aeo_content", 100)
+    rag = scores.get("rag_readiness", 100)
+    sd = scores.get("structured_data", 100)
+    if (aeo < 65 or rag < 65) and sd >= 55:
+        opps.append(
+            "Capture AI-driven visibility by improving content formatting — "
+            "the technical foundation for AI readiness is partially in place"
+        )
+
+    # NLP entity strength
+    if nlp and nlp.get("entities"):
+        entities = nlp["entities"]
+        # Find entity types with high salience
+        top_entity = entities[0] if entities else None
+        if top_entity and top_entity.get("salience", 0) > 0.3:
+            opps.append(
+                f"Double down on \"{top_entity['name']}\" content where the site "
+                f"already demonstrates topical authority (salience: "
+                f"{round(top_entity['salience'] * 100)}%)"
+            )
+
+    # CMS migration opportunity
+    if cms not in ("webflow", "unknown"):
+        weak_keys = _weak(scores)
+        if weak_keys:
+            weak_areas = ", ".join(
+                PILLAR_LABELS.get(k, k) for k in weak_keys[:2]
+            )
+            opps.append(
+                f"Consider platform migration to improve technical control over "
+                f"{weak_areas} — migration intelligence is included in this audit"
+            )
+
+    if not opps:
+        return ""
+
+    lines = ["## Strategic Opportunities\n"]
+    for opp in opps[:3]:
+        lines.append(f"- {opp}")
+
+    return "\n".join(lines)
+
+
+def _section_supporting_detail(report: dict, scores: Dict[str, int]) -> str:
+    """Section 8: 1–2 example findings per scorecard category."""
+    findings = _collect_findings(report)
+    if not findings:
+        return ""
+
+    # Group findings by composite category
+    tech_pillars = {"semantic_html", "structured_data", "js_bloat", "css_quality"}
+    content_pillars = {"aeo_content", "rag_readiness"}
+    ai_pillars = {"aeo_content", "rag_readiness", "agentic_protocols"}
+    structure_pillars = {"internal_linking", "accessibility", "data_integrity"}
+
+    def _pick(pillar_set: set, count: int = 2) -> List[str]:
+        out = []
+        for f in findings:
+            if f.get("pillar_key") in pillar_set:
+                desc = f.get("description", "")
+                if desc and desc not in out:
+                    out.append(desc)
+                if len(out) >= count:
+                    break
+        return out
+
+    tech_examples = _pick(tech_pillars)
+    content_examples = _pick(content_pillars)
+    ai_examples = _pick(ai_pillars - content_pillars)  # avoid duplicates
+    structure_examples = _pick(structure_pillars)
+
+    has_any = tech_examples or content_examples or ai_examples or structure_examples
+    if not has_any:
+        return ""
+
+    lines = ["### Supporting Detail\n"]
+
+    if tech_examples:
+        joined = " · ".join(tech_examples[:2])
+        lines.append(f"- **Technical Foundation:** {joined}")
+    if content_examples:
+        joined = " · ".join(content_examples[:2])
+        lines.append(f"- **Content Effectiveness:** {joined}")
+    if ai_examples:
+        joined = " · ".join(ai_examples[:2])
+        lines.append(f"- **AI Readiness:** {joined}")
+    if structure_examples:
+        joined = " · ".join(structure_examples[:2])
+        lines.append(f"- **Site Structure:** {joined}")
+
+    return "\n".join(lines)
+
+
+# ─── Main entry point ───
+
+
+def generate_executive_summary(
+    report: dict, competitive_data: dict | None = None
+) -> str:
+    """Generate a strategic diagnostic brief from a completed audit report.
+
+    Produces a single Markdown string with 8 sections. Sections are omitted
+    when the underlying data doesn't exist (e.g., no TIPR enrichment yet).
+    """
+    scores = _get_scores(report)
+
+    sections: List[str] = []
+
+    # 1. Strategic Context
+    sections.append(_section_strategic_context(report, scores))
+
+    # 2. Business Case (ROI Projection)
+    sections.append(_section_roi_projection(report, scores))
+
+    # 3. Audit Diagnosis
+    sections.append(_section_diagnosis(report, scores))
+
+    # 4. Key Risks
+    risks = _section_key_risks(report, scores)
+    if risks:
+        sections.append(risks)
+
+    # 5. Scorecard
+    sections.append(_section_scorecard(scores))
+
+    # 6. Priority Actions
+    sections.append(_section_priority_actions(report, scores))
+
+    # 7. Strategic Opportunities
+    opps = _section_opportunities(report, scores)
+    if opps:
+        sections.append(opps)
+
+    # 8. Supporting Detail
+    detail = _section_supporting_detail(report, scores)
+    if detail:
+        sections.append(detail)
+
+    # Competitor context (append if available)
+    if competitive_data:
+        comp = _section_competitor_context(report, competitive_data)
+        if comp:
+            sections.append(comp)
+
+    return "\n\n".join(sections)
+
+
+def _section_competitor_context(report: dict, competitive_data: dict) -> str:  # noqa: C901
+    """Optional: Competitor benchmarking context."""
     rankings = competitive_data.get("rankings", [])
+    primary = competitive_data.get("primary", {})
     advantages = competitive_data.get("advantages", [])
     weaknesses = competitive_data.get("weaknesses", [])
+
+    if not rankings:
+        return ""
 
     rank = primary.get("rank", "N/A")
     total = competitive_data.get("total_urls", len(rankings))
     primary_score = primary.get("overall_score", 0)
 
     lines = [
-        "## Competitor Context\n",
-        f"**Your rank: #{rank} out of {total} sites audited** (Score: {primary_score}/100)\n",
+        "## Competitive Position\n",
+        f"**Rank: #{rank} of {total} sites benchmarked** (Score: {primary_score}/100)\n",
     ]
 
     if rankings:
         leader = rankings[0]
         if leader.get("url") != report.get("url"):
             gap = leader.get("overall_score", 0) - primary_score
-            lines.append(f"The leading competitor scores {leader['overall_score']}/100, a **{gap}-point gap** above your site.\n")
+            lines.append(
+                f"The leading competitor scores {leader['overall_score']}/100, "
+                f"a {gap}-point gap above this site.\n"
+            )
 
     if advantages:
-        lines.append("**Competitive advantages:**")
+        lines.append("**Where you lead:**")
         for adv in advantages[:3]:
-            lines.append(f"- {adv['pillar']}: +{adv['diff']} pts above average ({adv['score']}/100 vs {adv['average']} avg)")
+            lines.append(
+                f"- {adv['pillar']}: +{adv['diff']} pts above average "
+                f"({adv['score']}/100 vs {adv['average']} avg)"
+            )
         lines.append("")
 
     if weaknesses:
-        lines.append("**Areas where competitors outperform you:**")
+        lines.append("**Where competitors lead:**")
         for weak in weaknesses[:3]:
-            lines.append(f"- {weak['pillar']}: {weak['diff']} pts below average ({weak['score']}/100 vs {weak['average']} avg)")
+            lines.append(
+                f"- {weak['pillar']}: {weak['diff']} pts below average "
+                f"({weak['score']}/100 vs {weak['average']} avg)"
+            )
         lines.append("")
-
-    if not advantages and not weaknesses:
-        lines.append("Your site performs within the competitive average across all pillars.")
 
     return "\n".join(lines).rstrip()

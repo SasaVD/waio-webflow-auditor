@@ -768,6 +768,35 @@ async def recompute_clusters(audit_id: str):
     return {"status": "cleared", "message": f"Cleared {', '.join(cleared)} — will recompute on next load"}
 
 
+@app.post("/api/audit/{audit_id}/recompute-summary")
+async def recompute_summary(audit_id: str):
+    """Admin endpoint: regenerate executive summary using the latest generator
+    and whatever enrichment data is currently available in the report."""
+    record = await get_audit_by_id(audit_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    report = record["report_json"]
+    if isinstance(report, str):
+        report = json.loads(report)
+    competitive_data = report.get("competitive_data")
+    new_summary = generate_executive_summary(report, competitive_data)
+    report["executive_summary"] = new_summary
+    import uuid as _uuid
+    import db_postgres as _db_pg
+    _aid = _uuid.UUID(str(audit_id))
+    pool = await _db_pg.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE audits SET report_json = $1 WHERE id = $2",
+            json.dumps(report), _aid,
+        )
+    return {
+        "status": "regenerated",
+        "length": len(new_summary),
+        "message": "Executive summary regenerated with current enrichment data",
+    }
+
+
 @app.get("/api/audit/enrichment-status/{audit_id}")
 async def get_enrichment_status(audit_id: str):
     """Lightweight endpoint to poll enrichment progress.
@@ -1527,6 +1556,20 @@ async def _enrich_report_from_crawl(
             f"{len(link_analysis.get('graph', {}).get('nodes', []))} graph nodes, "
             f"{len(link_analysis.get('clusters', []))} clusters"
         )
+
+        # Regenerate executive summary now that TIPR + clusters are available
+        try:
+            enriched_record = await get_audit_by_id(audit_id)
+            if enriched_record:
+                full_report = enriched_record["report_json"]
+                if isinstance(full_report, str):
+                    full_report = json.loads(full_report)
+                competitive_data = full_report.get("competitive_data")
+                new_summary = generate_executive_summary(full_report, competitive_data)
+                await update_audit_report(audit_id, {"executive_summary": new_summary})
+                logger.info(f"Executive summary regenerated post-enrichment: {len(new_summary)} chars")
+        except Exception as e:
+            logger.warning(f"Post-enrichment summary regeneration failed (non-fatal): {e}")
 
         # Also persist link graph edges to the dedicated table
         try:
