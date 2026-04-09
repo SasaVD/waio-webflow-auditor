@@ -1256,6 +1256,54 @@ def run_topic_clustering(
         }
         cluster_results.append(cluster_result)
 
+    # Post-process: fix any remaining generic "Cluster N" labels
+    for c in cluster_results:
+        if not c["label"].startswith("Cluster "):
+            continue
+        # Fallback A: use pillar page title
+        pillar = c.get("pillar")
+        if pillar and pillar.get("title"):
+            ptitle = pillar["title"].strip()
+            # Extract meaningful words from pillar title (cap at 4 words)
+            stop_words = {
+                "the", "a", "an", "and", "or", "in", "on", "at", "to", "for",
+                "of", "with", "by", "is", "are", "how", "what", "your", "our",
+                "home", "page", "|", "-", "—", "·",
+            }
+            title_words = [
+                w for w in ptitle.split()
+                if w.lower().strip(".,!?:;|—·-") not in stop_words and len(w) > 1
+            ]
+            if title_words:
+                c["label"] = " ".join(title_words[:4])
+                c["label_quality"] = "medium"
+                continue
+        # Fallback B: dominant URL path segment across cluster pages
+        from collections import Counter
+        seg_counter: Counter = Counter()
+        path_stop = {
+            "www", "com", "org", "net", "html", "htm", "php", "aspx",
+            "index", "page", "post", "category", "tag", "wp-content",
+        }
+        for pg in c.get("pages", []):
+            path = urlparse(pg.get("url", "")).path.strip("/")
+            segments = path.split("/")
+            if segments and segments[0]:
+                seg = re.sub(r"[-_]", " ", segments[0]).strip().lower()
+                if seg and seg not in path_stop and len(seg) > 1:
+                    seg_counter[seg] += 1
+        if seg_counter:
+            top_seg, top_count = seg_counter.most_common(1)[0]
+            total = len(c.get("pages", []))
+            # If one segment dominates (>50% of pages), use it
+            if top_count > total * 0.5:
+                c["label"] = f"{top_seg.title()} · Mixed Topics"
+            else:
+                # Use top 2 segments
+                top_segs = [s.title() for s, _ in seg_counter.most_common(2)]
+                c["label"] = " · ".join(top_segs)
+            c["label_quality"] = "low"
+
     # Sort clusters by strategic importance:
     # 1. Healthy clusters first (highest link health)
     # 2. Then biggest opportunity (most pages, lowest health)
