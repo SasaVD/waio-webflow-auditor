@@ -213,6 +213,8 @@ export default function DashboardOverviewPage() {
       avgHealth,
       totalGaps,
       recs: (sc.link_recommendations as any[])?.length ?? 0,
+      totalMissingLinks: (sc.total_missing_links as number) ?? 0,
+      healthyClusters: (sc.healthy_clusters as number) ?? 0,
       weakestLabel: weakest?.label || '',
       weakestHealth: weakest?.link_health?.health_pct ?? 0,
       quality: sc.quality as string,
@@ -571,7 +573,7 @@ export default function DashboardOverviewPage() {
                 <div>
                   <h2 className="text-sm font-bold text-text">Topic Clusters</h2>
                   <p className="text-xs text-text-muted mt-0.5">
-                    {clusterInfo.count} clusters &middot; {clusterInfo.avgHealth}% avg link health &middot; {clusterInfo.totalGaps} content gaps
+                    {clusterInfo.count} clusters &middot; {clusterInfo.avgHealth}% avg health &middot; {clusterInfo.totalMissingLinks > 0 ? `${clusterInfo.totalMissingLinks} missing links` : `${clusterInfo.totalGaps} content gaps`}
                   </p>
                 </div>
               </div>

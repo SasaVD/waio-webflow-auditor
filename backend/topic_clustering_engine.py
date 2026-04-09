@@ -472,6 +472,72 @@ def detect_optimal_k(
 
 
 # ---------------------------------------------------------------------------
+# 1C-bis. Merge Small Clusters
+# ---------------------------------------------------------------------------
+
+
+def _merge_small_clusters(
+    labels: np.ndarray,
+    feature_matrix: sparse.csr_matrix,
+    min_cluster_size: int = 4,
+) -> np.ndarray:
+    """Merge clusters smaller than min_cluster_size into nearest large neighbor.
+
+    Steps:
+    1. Identify clusters with fewer than min_cluster_size pages
+    2. Compute centroid for each cluster
+    3. For each small cluster, find the nearest large cluster by cosine distance
+    4. Reassign pages from small clusters to the nearest large cluster
+    """
+    from scipy.spatial.distance import cosine
+
+    unique_labels = set(int(l) for l in labels)
+    cluster_sizes = {l: int(np.sum(labels == l)) for l in unique_labels}
+
+    small_clusters = {l for l, s in cluster_sizes.items() if s < min_cluster_size}
+    large_clusters = {l for l, s in cluster_sizes.items() if s >= min_cluster_size}
+
+    if not small_clusters or not large_clusters:
+        return labels  # Nothing to merge
+
+    logger.info(
+        f"Merging {len(small_clusters)} small clusters "
+        f"(< {min_cluster_size} pages) into {len(large_clusters)} larger clusters"
+    )
+
+    # Compute centroids
+    dense = feature_matrix.toarray() if sparse.issparse(feature_matrix) else feature_matrix
+    centroids: Dict[int, np.ndarray] = {}
+    for l in unique_labels:
+        mask = labels == l
+        if np.any(mask):
+            centroids[l] = np.mean(dense[mask], axis=0)
+
+    # Merge each small cluster into nearest large
+    new_labels = labels.copy()
+    for small_c in small_clusters:
+        if small_c not in centroids:
+            continue
+        small_center = centroids[small_c]
+        best_large = None
+        best_dist = float("inf")
+        for large_c in large_clusters:
+            if large_c not in centroids:
+                continue
+            dist = cosine(small_center, centroids[large_c])
+            if dist < best_dist:
+                best_dist = dist
+                best_large = large_c
+        if best_large is not None:
+            new_labels[labels == small_c] = best_large
+
+    # Re-index labels to be consecutive 0..N-1
+    remaining = sorted(set(int(l) for l in new_labels))
+    remap = {old: new for new, old in enumerate(remaining)}
+    return np.array([remap[int(l)] for l in new_labels])
+
+
+# ---------------------------------------------------------------------------
 # 1D. Cluster Labeling with c-TF-IDF
 # ---------------------------------------------------------------------------
 
@@ -480,11 +546,17 @@ def _generate_cluster_labels(
     pages: List[Dict[str, Any]],
     labels: np.ndarray,
     n_clusters: int,
-) -> List[str]:
-    """Generate human-readable cluster labels using c-TF-IDF + top entities."""
+) -> List[Tuple[str, str]]:
+    """Generate human-readable cluster labels using c-TF-IDF + top entities.
+
+    Returns list of (label_text, label_quality) tuples.
+    label_quality: "high" (c-TF-IDF terms found), "medium" (entity/title fallback),
+                   "low" (generic fallback).
+    """
     # Build per-cluster mega-documents from titles + content snippets
     cluster_docs = [""] * n_clusters
     cluster_entities: List[Dict[str, float]] = [defaultdict(float) for _ in range(n_clusters)]
+    cluster_titles: List[List[str]] = [[] for _ in range(n_clusters)]
 
     for page, label in zip(pages, labels):
         if label < 0 or label >= n_clusters:
@@ -493,6 +565,8 @@ def _generate_cluster_labels(
         content = page.get("content", "") or page.get("meta_description", "") or ""
         snippet = " ".join(content.split()[:300])
         cluster_docs[label] += f" {title} {title} {snippet}"
+        if title:
+            cluster_titles[label].append(title)
 
         for ent in (page.get("entities") or [])[:30]:
             name = ent.get("name", "").strip()
@@ -511,27 +585,31 @@ def _generate_cluster_labels(
         tfidf_matrix = vec.fit_transform(cluster_docs)
         feature_names = vec.get_feature_names_out()
     except ValueError:
-        return [f"Cluster {i}" for i in range(n_clusters)]
+        tfidf_matrix = None
+        feature_names = []
 
-    labels_list = []
+    results: List[Tuple[str, str]] = []
     for cluster_idx in range(n_clusters):
+        label_parts: List[str] = []
+        seen_lower: Set[str] = set()
+        quality = "high"
+
         # Get top TF-IDF terms
-        row = tfidf_matrix[cluster_idx].toarray().flatten()
-        top_term_indices = row.argsort()[::-1][:10]
-        top_terms = [
-            (feature_names[i], float(row[i]))
-            for i in top_term_indices
-            if row[i] > 0
-        ]
+        top_terms: List[Tuple[str, float]] = []
+        if tfidf_matrix is not None:
+            row = tfidf_matrix[cluster_idx].toarray().flatten()
+            top_term_indices = row.argsort()[::-1][:10]
+            top_terms = [
+                (feature_names[i], float(row[i]))
+                for i in top_term_indices
+                if row[i] > 0
+            ]
 
         # Get top entities
         ent_dict = cluster_entities[cluster_idx]
         top_ents = sorted(ent_dict.items(), key=lambda x: x[1], reverse=True)[:5]
 
         # Combine: prefer entity names (more semantically meaningful), fill with terms
-        label_parts: List[str] = []
-        seen_lower: Set[str] = set()
-
         for ent_name, _sal in top_ents:
             clean = ent_name.strip()
             if clean.lower() not in seen_lower and len(clean) > 1:
@@ -548,12 +626,47 @@ def _generate_cluster_labels(
             if len(label_parts) >= 4:
                 break
 
-        if label_parts:
-            labels_list.append(" \u00b7 ".join(label_parts[:4]))
-        else:
-            labels_list.append(f"Cluster {cluster_idx}")
+        # Fallback 1: if no c-TF-IDF labels, try title bigrams
+        if not label_parts:
+            quality = "medium"
+            # Extract common bigrams from titles in this cluster
+            from collections import Counter
+            bigram_counts: Counter = Counter()
+            stop = {"the", "a", "an", "and", "or", "in", "on", "at", "to", "for",
+                    "of", "with", "by", "is", "are", "how", "what", "your", "our"}
+            for title in cluster_titles[cluster_idx]:
+                words = re.findall(r"[a-z]+", title.lower())
+                words = [w for w in words if w not in stop and len(w) > 2]
+                for i in range(len(words) - 1):
+                    bigram_counts[f"{words[i]} {words[i+1]}"] += 1
 
-    return labels_list
+            for gram, count in bigram_counts.most_common(4):
+                if count >= 2 and gram.lower() not in seen_lower:
+                    label_parts.append(gram.title())
+                    seen_lower.add(gram.lower())
+
+        # Fallback 2: use single significant words from titles
+        if not label_parts:
+            from collections import Counter
+            word_counts: Counter = Counter()
+            stop2 = {"the", "a", "an", "and", "or", "in", "on", "at", "to", "for",
+                     "of", "with", "by", "is", "are", "how", "what", "your", "our",
+                     "this", "that", "from", "page", "home", "blog"}
+            for title in cluster_titles[cluster_idx]:
+                for w in re.findall(r"[a-z]+", title.lower()):
+                    if w not in stop2 and len(w) > 3:
+                        word_counts[w] += 1
+            for word, count in word_counts.most_common(4):
+                if count >= 2 and word not in seen_lower:
+                    label_parts.append(word.title())
+                    seen_lower.add(word)
+
+        if label_parts:
+            results.append((" \u00b7 ".join(label_parts[:4]), quality))
+        else:
+            results.append((f"Cluster {cluster_idx}", "low"))
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -654,26 +767,73 @@ def _identify_pillar_page(
 # ---------------------------------------------------------------------------
 
 
+def _normalize_url(url: str) -> str:
+    """Normalize URL for link matching (trailing slash, www, http/https)."""
+    url = url.rstrip("/")
+    url = url.replace("http://", "https://")
+    url = url.replace("://www.", "://")
+    return url.lower()
+
+
+def _build_normalized_link_index(
+    link_index: Dict[str, Set[str]],
+) -> Tuple[Dict[str, Set[str]], Dict[str, str]]:
+    """Build a normalized link index plus a mapping from normalized -> original URL.
+
+    Returns:
+        (norm_link_index, norm_to_original) where:
+        - norm_link_index maps normalized source URL -> set of normalized target URLs
+        - norm_to_original maps normalized URL -> first seen original URL
+    """
+    norm_index: Dict[str, Set[str]] = defaultdict(set)
+    norm_to_orig: Dict[str, str] = {}
+
+    for src, targets in link_index.items():
+        ns = _normalize_url(src)
+        if ns not in norm_to_orig:
+            norm_to_orig[ns] = src
+        for tgt in targets:
+            nt = _normalize_url(tgt)
+            if nt not in norm_to_orig:
+                norm_to_orig[nt] = tgt
+            norm_index[ns].add(nt)
+
+    return dict(norm_index), norm_to_orig
+
+
 def _validate_cluster_links(
     cluster_pages: List[Dict[str, Any]],
     pillar_url: str,
     link_index: Dict[str, Set[str]],
+    norm_link_index: Dict[str, Set[str]] | None = None,
 ) -> Dict[str, Any]:
-    """Check linking between cluster pages and the pillar page."""
+    """Check linking between cluster pages and the pillar page.
+
+    Uses normalized URLs to avoid false negatives from trailing slashes,
+    www vs non-www, and http vs https mismatches.
+    """
+    # Use normalized index if provided, otherwise normalize on the fly
+    if norm_link_index is None:
+        norm_link_index, _ = _build_normalized_link_index(link_index)
+
+    norm_pillar = _normalize_url(pillar_url)
+    pillar_targets = norm_link_index.get(norm_pillar, set())
+
     pages_linking_to_pillar = 0
     pillar_links_to_pages = 0
     bidirectional = 0
     unlinked = 0
-    pillar_targets = link_index.get(pillar_url, set())
 
     page_details = []
     for page in cluster_pages:
         url = page["url"]
-        if url == pillar_url:
+        norm_url = _normalize_url(url)
+        if norm_url == norm_pillar:
             continue
 
-        links_to_pillar = pillar_url in link_index.get(url, set())
-        pillar_links_here = url in pillar_targets
+        page_targets = norm_link_index.get(norm_url, set())
+        links_to_pillar = norm_pillar in page_targets
+        pillar_links_here = norm_url in pillar_targets
 
         if links_to_pillar:
             pages_linking_to_pillar += 1
@@ -746,49 +906,110 @@ def _detect_content_gaps(
 # ---------------------------------------------------------------------------
 
 
+def _suggest_anchor_text(
+    cluster_label: str,
+    target_title: str,
+    cluster_entities: List[Any] | None = None,
+) -> List[str]:
+    """Generate 2-3 anchor text suggestions for a missing link.
+
+    Uses cluster terms + target page title keywords.
+    """
+    suggestions: List[str] = []
+    seen: Set[str] = set()
+
+    # Extract meaningful words from cluster label
+    label_parts = [p.strip().lower() for p in cluster_label.split("·")]
+    # Extract meaningful words from target title
+    title_words = [
+        w.lower() for w in (target_title or "").split()
+        if len(w) > 3 and w.lower() not in {
+            "the", "and", "for", "with", "from", "this", "that", "your", "about",
+            "page", "home", "blog", "post", "article", "guide",
+        }
+    ]
+
+    # Suggestion 1: use cluster label's first part + "services/solutions/guide"
+    if label_parts:
+        main_topic = label_parts[0]
+        if main_topic.lower() not in seen:
+            suggestions.append(main_topic)
+            seen.add(main_topic.lower())
+
+    # Suggestion 2: 2-3 word combo from title
+    if len(title_words) >= 2:
+        anchor = " ".join(title_words[:3])
+        if anchor.lower() not in seen:
+            suggestions.append(anchor)
+            seen.add(anchor.lower())
+
+    # Suggestion 3: entity name from cluster
+    if cluster_entities:
+        for ent in cluster_entities[:3]:
+            name = ent[0] if isinstance(ent, (list, tuple)) else str(ent)
+            if name.lower() not in seen and len(name) > 2:
+                suggestions.append(name)
+                seen.add(name.lower())
+                break
+
+    return suggestions[:3]
+
+
 def _generate_link_recommendations(
     clusters: List[Dict[str, Any]],
     link_index: Dict[str, Set[str]],
 ) -> List[Dict[str, Any]]:
     """Generate actionable link recommendations from cluster analysis."""
     recommendations = []
+    total_missing_links = 0
 
     for cluster in clusters:
         pillar = cluster.get("pillar")
         if not pillar:
             continue
         pillar_url = pillar["url"]
+        pillar_title = pillar.get("title", "")
         link_health = cluster.get("link_health", {})
+        cluster_entities = cluster.get("top_entities", [])
 
         for page_detail in link_health.get("page_details", []):
             url = page_detail["url"]
             title = page_detail.get("title", "")
 
             if not page_detail.get("links_to_pillar"):
+                total_missing_links += 1
+                anchors = _suggest_anchor_text(
+                    cluster["label"], pillar_title, cluster_entities
+                )
                 recommendations.append({
                     "type": "missing_pillar_link",
                     "source_url": url,
                     "target_url": pillar_url,
                     "cluster_label": cluster["label"],
                     "reason": (
-                        f'This page ("{title}") is in the "{cluster["label"]}" cluster '
-                        f"but doesn't link to its pillar page. Adding a link strengthens topical authority."
+                        f'"{title or url}" doesn\'t link to its pillar page. '
+                        f"Adding a contextual link strengthens topical authority."
                     ),
+                    "suggested_anchors": anchors,
                 })
 
             if not page_detail.get("pillar_links_here"):
+                total_missing_links += 1
+                anchors = _suggest_anchor_text(
+                    cluster["label"], title, cluster_entities
+                )
                 recommendations.append({
                     "type": "missing_pillar_backlink",
                     "source_url": pillar_url,
                     "target_url": url,
                     "cluster_label": cluster["label"],
                     "reason": (
-                        f'The pillar page for "{cluster["label"]}" doesn\'t link to '
-                        f'"{title}". Adding this link distributes authority to supporting content.'
+                        f'The pillar page doesn\'t link to "{title or url}". '
+                        f"Adding this link distributes authority to supporting content."
                     ),
+                    "suggested_anchors": anchors,
                 })
 
-    # Limit total recommendations
     # Prioritize missing_pillar_link (most actionable)
     recommendations.sort(
         key=lambda r: 0 if r["type"] == "missing_pillar_link" else 1
@@ -864,6 +1085,11 @@ def run_topic_clustering(
     )
     cluster_labels = km.fit_predict(feature_matrix)
 
+    # 3b. Merge small clusters (< 4 pages) into nearest large neighbor
+    cluster_labels = _merge_small_clusters(cluster_labels, feature_matrix, min_cluster_size=4)
+    k = len(set(int(l) for l in cluster_labels))
+    logger.info(f"After merging small clusters: {k} clusters remain")
+
     # Compute silhouette score
     try:
         sil_score = float(silhouette_score(
@@ -873,10 +1099,12 @@ def run_topic_clustering(
     except Exception:
         sil_score = 0.0
 
-    # 4. Generate cluster labels
-    label_names = _generate_cluster_labels(pages, cluster_labels, k)
+    # 4. Generate cluster labels (returns list of (label, quality) tuples)
+    label_results = _generate_cluster_labels(pages, cluster_labels, k)
+    label_names = [lr[0] for lr in label_results]
+    label_qualities = [lr[1] for lr in label_results]
 
-    # 5. Build link index for validation
+    # 5. Build link index for validation (raw + normalized)
     link_index: Dict[str, Set[str]] = defaultdict(set)
     if links:
         for link in links:
@@ -884,6 +1112,8 @@ def run_topic_clustering(
             tgt = link.get("target", "")
             if src and tgt:
                 link_index[src].add(tgt)
+
+    norm_link_index, _ = _build_normalized_link_index(link_index)
 
     # 6. Build cluster analysis
     cluster_results = []
@@ -922,7 +1152,9 @@ def run_topic_clustering(
         link_health = {}
         page_details_for_table = []
         if pillar and links:
-            link_result = _validate_cluster_links(cluster_pages, pillar["url"], link_index)
+            link_result = _validate_cluster_links(
+                cluster_pages, pillar["url"], link_index, norm_link_index
+            )
             link_health = {
                 "pages_linking_to_pillar": link_result["pages_linking_to_pillar"],
                 "pillar_links_to_pages": link_result["pillar_links_to_pages"],
@@ -987,6 +1219,7 @@ def run_topic_clustering(
         cluster_result = {
             "id": cluster_idx,
             "label": label_names[cluster_idx],
+            "label_quality": label_qualities[cluster_idx] if cluster_idx < len(label_qualities) else "low",
             "color": CLUSTER_COLORS[cluster_idx % len(CLUSTER_COLORS)],
             "top_entities": top_entities,
             "pillar": pillar,
@@ -998,8 +1231,17 @@ def run_topic_clustering(
         }
         cluster_results.append(cluster_result)
 
-    # Sort clusters by size descending
-    cluster_results.sort(key=lambda c: c["size"], reverse=True)
+    # Sort clusters by strategic importance:
+    # 1. Healthy clusters first (highest link health)
+    # 2. Then biggest opportunity (most pages, lowest health)
+    # 3. Small clusters last
+    def _cluster_sort_key(c: Dict[str, Any]) -> Tuple[int, int, int]:
+        hp = c.get("link_health", {}).get("health_pct", 0)
+        size = c.get("size", 0)
+        # Primary: high health first (desc), Secondary: large size (desc)
+        return (-hp, -size, 0)
+
+    cluster_results.sort(key=_cluster_sort_key)
     # Re-index
     for i, c in enumerate(cluster_results):
         c["id"] = i
@@ -1007,6 +1249,17 @@ def run_topic_clustering(
 
     # Generate link recommendations
     link_recommendations = _generate_link_recommendations(cluster_results, link_index)
+
+    # Count total missing links
+    total_missing_links = sum(
+        1 for rec in link_recommendations
+        if rec["type"] in ("missing_pillar_link", "missing_pillar_backlink")
+    )
+    # Also count healthy clusters
+    healthy_clusters = sum(
+        1 for c in cluster_results
+        if c.get("link_health", {}).get("health_pct", 0) >= 50
+    )
 
     # Quality badge
     if sil_score >= 0.5:
@@ -1019,13 +1272,15 @@ def run_topic_clustering(
         quality = "low"
 
     result = {
-        "version": "1.0",
+        "version": "1.1",
         "method": "hybrid_entity_tfidf",
         "n_clusters": len(cluster_results),
         "silhouette_score": round(sil_score, 3),
         "quality": quality,
         "detection_method": detection_method,
         "entity_data_coverage": f"{pages_with_entities}/{n_pages}",
+        "total_missing_links": total_missing_links,
+        "healthy_clusters": healthy_clusters,
         "clusters": cluster_results,
         "uncategorized_pages": uncategorized_pages,
         "link_recommendations": link_recommendations,
@@ -1045,6 +1300,81 @@ def run_topic_clustering(
 # ---------------------------------------------------------------------------
 
 
+def _lightweight_entities(title: str, url: str) -> List[Dict[str, Any]]:
+    """Extract pseudo-entities from title + URL for pages without NLP data.
+
+    Uses simple heuristics: significant words from titles and URL segments.
+    Not as accurate as Google NLP but gives every page some entity signal.
+    """
+    COMMON = {
+        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+        "of", "with", "by", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "shall", "can", "this", "that", "these",
+        "those", "it", "its", "from", "how", "what", "why", "when", "where",
+        "who", "which", "your", "our", "my", "his", "her", "their", "all",
+        "each", "every", "both", "few", "more", "most", "other", "some",
+        "no", "not", "only", "own", "same", "so", "than", "too", "very",
+        "about", "home", "page", "blog", "post", "article", "new", "best",
+        "top", "free", "guide", "ultimate", "complete", "step", "tips",
+        "get", "use", "using", "make", "one", "two", "three", "first",
+    }
+
+    entities: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+
+    # Extract from title
+    if title:
+        words = title.split()
+        i = 0
+        while i < len(words):
+            w = words[i]
+            if w[0:1].isupper() and w.lower() not in COMMON and len(w) > 2:
+                # Collect consecutive capitalized words as a phrase
+                phrase = [w]
+                j = i + 1
+                while j < len(words) and words[j][0:1].isupper() and words[j].lower() not in COMMON:
+                    phrase.append(words[j])
+                    j += 1
+                name = " ".join(phrase)
+                nl = name.lower()
+                if nl not in seen and len(name) > 2:
+                    entities.append({
+                        "name": name,
+                        "entity_type": "INFERRED",
+                        "salience": 0.15 if len(phrase) > 1 else 0.08,
+                    })
+                    seen.add(nl)
+                i = j
+            else:
+                wl = w.lower().strip(".,!?:;()[]{}\"'")
+                if wl not in COMMON and len(wl) > 3 and wl not in seen:
+                    entities.append({
+                        "name": wl.title(),
+                        "entity_type": "INFERRED",
+                        "salience": 0.05,
+                    })
+                    seen.add(wl)
+                i += 1
+
+    # Extract from URL path segments
+    parsed = urlparse(url)
+    segments = [s for s in parsed.path.strip("/").split("/") if s]
+    for seg in segments:
+        tokens = re.split(r"[-_.]", seg)
+        for tok in tokens:
+            tl = tok.lower()
+            if tl not in COMMON and len(tl) > 3 and tl not in seen:
+                entities.append({
+                    "name": tl.title(),
+                    "entity_type": "INFERRED",
+                    "salience": 0.03,
+                })
+                seen.add(tl)
+
+    return entities[:10]
+
+
 def prepare_pages_from_report(report: Dict[str, Any]) -> Tuple[
     List[Dict[str, Any]], List[Dict[str, Any]]
 ]:
@@ -1053,8 +1383,9 @@ def prepare_pages_from_report(report: Dict[str, Any]) -> Tuple[
     Merges data from:
       - link_analysis.graph.nodes (URL, title, cluster, inbound/outbound, depth)
       - tipr_analysis.pages (PageRank scores, classification)
-      - nlp_analysis (entities, categories — homepage-only currently)
-      - crawl data page meta (title, meta_description from DataForSEO)
+      - nlp_analysis (entities, categories — homepage)
+      - page_entities (multi-page NLP entity data from enrichment)
+      - Lightweight fallback entities from title + URL for all other pages
 
     Returns:
         (pages, links) ready for run_topic_clustering().
@@ -1076,10 +1407,13 @@ def prepare_pages_from_report(report: Dict[str, Any]) -> Tuple[
     tipr_pages = (report.get("tipr_analysis") or {}).get("pages", [])
     tipr_map = {p["url"]: p for p in tipr_pages if isinstance(p, dict)}
 
-    # NLP data (currently homepage-only, but structured for future expansion)
+    # NLP data — homepage entities from nlp_analysis
     nlp = report.get("nlp_analysis") or {}
     homepage_url = report.get("url", "")
     homepage_entities = nlp.get("entities", [])
+
+    # Multi-page entity data (from enrichment step)
+    page_entities = report.get("page_entities") or {}
 
     # Build pages list
     pages = []
@@ -1101,9 +1435,18 @@ def prepare_pages_from_report(report: Dict[str, Any]) -> Tuple[
             page["pagerank_score"] = tipr.get("pagerank_score", 0)
             page["click_depth"] = tipr.get("click_depth", page["click_depth"])
 
-        # Merge NLP entities (homepage only currently)
-        if url == homepage_url or url.rstrip("/") == homepage_url.rstrip("/"):
+        # Priority 1: page_entities from multi-page NLP extraction
+        pe = page_entities.get(url)
+        if pe and pe.get("entities"):
+            page["entities"] = pe["entities"]
+        # Priority 2: homepage entities from initial NLP analysis
+        elif url == homepage_url or url.rstrip("/") == homepage_url.rstrip("/"):
             page["entities"] = homepage_entities
+        # Priority 3: lightweight fallback from title + URL
+        else:
+            title = page["title"]
+            if title:
+                page["entities"] = _lightweight_entities(title, url)
 
         pages.append(page)
 

@@ -234,12 +234,13 @@ export function generateExcel(report: Record<string, any>): void {
 
     // Cluster recommendations sheet
     if (semantic.link_recommendations?.length) {
-      const recData: any[][] = [['Type', 'Source URL', 'Target URL', 'Cluster', 'Reason']];
+      const recData: any[][] = [['Type', 'Source URL', 'Target URL', 'Cluster', 'Reason', 'Suggested Anchors']];
       for (const rec of semantic.link_recommendations) {
-        recData.push([rec.type, rec.source_url, rec.target_url, rec.cluster_label, rec.reason]);
+        const anchors = (rec.suggested_anchors || []).join(', ');
+        recData.push([rec.type, rec.source_url, rec.target_url, rec.cluster_label, rec.reason, anchors]);
       }
       const recSheet = XLSX.utils.aoa_to_sheet(recData);
-      recSheet['!cols'] = [{ wch: 22 }, { wch: 40 }, { wch: 40 }, { wch: 30 }, { wch: 60 }];
+      recSheet['!cols'] = [{ wch: 22 }, { wch: 40 }, { wch: 40 }, { wch: 30 }, { wch: 60 }, { wch: 30 }];
       XLSX.utils.book_append_sheet(wb, recSheet, 'Cluster Recommendations');
     }
   } else {

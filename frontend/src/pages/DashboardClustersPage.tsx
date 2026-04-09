@@ -17,6 +17,7 @@ import TopicClusterGraph from '../components/TopicClusterGraph';
 interface SemanticCluster {
   id: number;
   label: string;
+  label_quality?: 'high' | 'medium' | 'low';
   color: string;
   top_entities: [string, number][];
   pillar: {
@@ -62,6 +63,8 @@ interface SemanticClusters {
   quality: string;
   detection_method: string;
   entity_data_coverage: string;
+  total_missing_links?: number;
+  healthy_clusters?: number;
   clusters: SemanticCluster[];
   uncategorized_pages: unknown[];
   link_recommendations: {
@@ -70,6 +73,7 @@ interface SemanticClusters {
     target_url: string;
     cluster_label: string;
     reason: string;
+    suggested_anchors?: string[];
   }[];
 }
 
@@ -93,15 +97,19 @@ const CLUSTER_COLORS = [
 ];
 
 const healthColor = (pct: number): string => {
-  if (pct >= 80) return '#22C55E';
-  if (pct >= 50) return '#EAB308';
-  return '#EF4444';
+  if (pct >= 80) return '#16a34a';
+  if (pct >= 60) return '#22c55e';
+  if (pct >= 40) return '#eab308';
+  if (pct >= 20) return '#f97316';
+  return '#ef4444';
 };
 
 const healthLabel = (pct: number): string => {
-  if (pct >= 80) return 'Healthy';
-  if (pct >= 50) return 'Moderate';
-  return 'Needs Work';
+  if (pct >= 80) return 'Excellent';
+  if (pct >= 60) return 'Good';
+  if (pct >= 40) return 'Moderate';
+  if (pct >= 20) return 'Needs Work';
+  return 'Critical';
 };
 
 const qualityBadge = (q: string): { label: string; color: string } => {
@@ -170,6 +178,11 @@ function SemanticClusterCard({
               <span className="text-sm font-bold text-text">
                 {cluster.label}
               </span>
+              {cluster.label_quality === 'low' && (
+                <span className="text-[8px] font-semibold text-text-muted bg-surface-overlay px-1.5 py-0.5 rounded-full flex-shrink-0">
+                  auto
+                </span>
+              )}
               {isExpanded ? (
                 <ChevronDown size={14} className="text-text-muted flex-shrink-0" />
               ) : (
@@ -595,6 +608,8 @@ export default function DashboardClustersPage() {
     const totalGaps = clusters.reduce((s, c) => s + c.content_gaps.length, 0);
     const weakest = [...clusters].sort((a, b) => (a.link_health?.health_pct ?? 0) - (b.link_health?.health_pct ?? 0))[0];
     const strongest = [...clusters].sort((a, b) => (b.link_health?.health_pct ?? 0) - (a.link_health?.health_pct ?? 0))[0];
+    const totalMissingLinks = semanticData.total_missing_links ?? 0;
+    const healthyClusters = semanticData.healthy_clusters ?? 0;
     return {
       totalClusters: clusters.length,
       totalClustered,
@@ -603,6 +618,8 @@ export default function DashboardClustersPage() {
       avgHealth,
       totalGaps,
       totalRecs: semanticData.link_recommendations.length,
+      totalMissingLinks,
+      healthyClusters,
       weakest,
       strongest,
     };
@@ -772,7 +789,7 @@ export default function DashboardClustersPage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.06 }}
-              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3"
+              className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3"
             >
               <div className="bg-surface-raised border border-border rounded-xl p-3 text-center">
                 <div className="text-xl font-bold text-text font-heading">{stats.totalClusters}</div>
@@ -783,8 +800,22 @@ export default function DashboardClustersPage() {
                 <div className="text-[9px] text-text-muted uppercase tracking-wider mt-0.5">Clustered</div>
               </div>
               <div className="bg-surface-raised border border-border rounded-xl p-3 text-center">
-                <div className="text-xl font-bold text-text font-heading">{stats.totalPages}</div>
-                <div className="text-[9px] text-text-muted uppercase tracking-wider mt-0.5">Total Pages</div>
+                <div className="text-xl font-bold font-heading" style={{ color: healthColor(stats.avgHealth) }}>
+                  {stats.avgHealth}%
+                </div>
+                <div className="text-[9px] text-text-muted uppercase tracking-wider mt-0.5">Avg Health</div>
+              </div>
+              <div className="bg-surface-raised border border-border rounded-xl p-3 text-center">
+                <div className="text-xl font-bold text-green-500 font-heading">{stats.healthyClusters}</div>
+                <div className="text-[9px] text-text-muted uppercase tracking-wider mt-0.5">Healthy</div>
+              </div>
+              <div className="bg-surface-raised border border-border rounded-xl p-3 text-center">
+                <div className="text-xl font-bold text-red-400 font-heading">{stats.totalMissingLinks}</div>
+                <div className="text-[9px] text-text-muted uppercase tracking-wider mt-0.5">Missing Links</div>
+              </div>
+              <div className="bg-surface-raised border border-border rounded-xl p-3 text-center">
+                <div className="text-xl font-bold text-amber-500 font-heading">{stats.totalGaps}</div>
+                <div className="text-[9px] text-text-muted uppercase tracking-wider mt-0.5">Content Gaps</div>
               </div>
               <div className="bg-surface-raised border border-border rounded-xl p-3 text-center">
                 <div className={`text-xl font-bold font-heading ${stats.uncategorized > 0 ? 'text-amber-500' : 'text-text'}`}>
@@ -793,14 +824,28 @@ export default function DashboardClustersPage() {
                 <div className="text-[9px] text-text-muted uppercase tracking-wider mt-0.5">Uncategorized</div>
               </div>
               <div className="bg-surface-raised border border-border rounded-xl p-3 text-center">
-                <div className="text-xl font-bold font-heading" style={{ color: healthColor(stats.avgHealth) }}>
-                  {stats.avgHealth}%
-                </div>
-                <div className="text-[9px] text-text-muted uppercase tracking-wider mt-0.5">Avg Health</div>
+                <div className="text-xl font-bold text-text font-heading">{stats.totalPages}</div>
+                <div className="text-[9px] text-text-muted uppercase tracking-wider mt-0.5">Total Pages</div>
               </div>
-              <div className="bg-surface-raised border border-border rounded-xl p-3 text-center">
-                <div className="text-xl font-bold text-amber-500 font-heading">{stats.totalGaps}</div>
-                <div className="text-[9px] text-text-muted uppercase tracking-wider mt-0.5">Content Gaps</div>
+            </motion.div>
+          )}
+
+          {/* Link Health Summary */}
+          {stats && stats.totalMissingLinks > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.07 }}
+              className="bg-red-500/5 border border-red-500/20 rounded-xl px-4 py-3 flex items-center gap-3"
+            >
+              <Unlink size={16} className="text-red-400 flex-shrink-0" />
+              <div className="text-xs text-text-secondary">
+                <span className="font-semibold text-red-400">{stats.totalMissingLinks} missing links</span>{' '}
+                detected across {stats.totalClusters} clusters.{' '}
+                {stats.healthyClusters} of {stats.totalClusters} clusters have healthy linking (&ge;50%).{' '}
+                <span className="text-text-muted">
+                  Fixing these would strengthen your site&apos;s topical authority structure.
+                </span>
               </div>
             </motion.div>
           )}
@@ -892,6 +937,19 @@ export default function DashboardClustersPage() {
                       <p className="text-[10px] text-text-muted mt-0.5 truncate">
                         {shortenUrl(rec.source_url)} → {shortenUrl(rec.target_url)}
                       </p>
+                      {rec.suggested_anchors && rec.suggested_anchors.length > 0 && (
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          <span className="text-[9px] text-text-muted">Anchor:</span>
+                          {rec.suggested_anchors.map((anchor, j) => (
+                            <span
+                              key={j}
+                              className="text-[9px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded"
+                            >
+                              {anchor}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

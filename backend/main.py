@@ -74,6 +74,7 @@ from google_nlp_client import (
 )
 import cross_audit_queries
 import json
+import re
 import uuid
 from urllib.parse import urlparse
 
@@ -678,6 +679,20 @@ async def get_audit_report(audit_id: str):
         graph_data = (report.get("link_analysis") or {}).get("graph")
         if graph_data and graph_data.get("nodes") and len(graph_data["nodes"]) >= 20:
             try:
+                # Run entity extraction if NLP is configured and not already done
+                updates: dict = {}
+                if is_nlp_configured() and not report.get("page_entities"):
+                    page_entities = await _extract_page_entities(
+                        graph_data=graph_data,
+                        tipr_analysis=report.get("tipr_analysis"),
+                        homepage_url=report.get("url", ""),
+                        existing_entities=None,
+                        max_pages=25,
+                    )
+                    if page_entities:
+                        report["page_entities"] = page_entities
+                        updates["page_entities"] = page_entities
+
                 cluster_pages, cluster_links = prepare_pages_from_report(report)
                 if cluster_pages:
                     sc_result = run_topic_clustering(
@@ -686,11 +701,13 @@ async def get_audit_report(audit_id: str):
                     )
                     if sc_result:
                         report["semantic_clusters"] = sc_result
-                        await update_audit_report(audit_id, {"semantic_clusters": sc_result})
+                        updates["semantic_clusters"] = sc_result
                         logger.info(
                             f"Lazy semantic clustering for audit {audit_id}: "
                             f"{sc_result['n_clusters']} clusters"
                         )
+                if updates:
+                    await update_audit_report(audit_id, updates)
             except Exception as e:
                 logger.warning(f"Lazy semantic clustering failed for {audit_id}: {e}")
 
@@ -720,6 +737,35 @@ async def recompute_tipr(audit_id: str):
             json.dumps(report), _aid,
         )
     return {"status": "cleared", "message": "tipr_analysis removed — will recompute on next load"}
+
+
+@app.post("/api/audit/{audit_id}/recompute-clusters")
+async def recompute_clusters(audit_id: str):
+    """Admin endpoint: clear cached semantic_clusters and page_entities
+    so lazy computation re-runs with the latest clustering engine."""
+    record = await get_audit_by_id(audit_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    report = record["report_json"]
+    cleared = []
+    if "semantic_clusters" in report:
+        del report["semantic_clusters"]
+        cleared.append("semantic_clusters")
+    if "page_entities" in report:
+        del report["page_entities"]
+        cleared.append("page_entities")
+    if not cleared:
+        return {"status": "noop", "message": "No cached clustering data to clear"}
+    import uuid as _uuid
+    import db_postgres as _db_pg
+    _aid = _uuid.UUID(str(audit_id))
+    pool = await _db_pg.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE audits SET report_json = $1 WHERE id = $2",
+            json.dumps(report), _aid,
+        )
+    return {"status": "cleared", "message": f"Cleared {', '.join(cleared)} — will recompute on next load"}
 
 
 @app.get("/api/audit/enrichment-status/{audit_id}")
@@ -1142,6 +1188,220 @@ async def dataforseo_pingback(task_id: str, background_tasks: BackgroundTasks):
     return {"status": "ok"}
 
 
+async def _extract_page_entities(
+    graph_data: dict,
+    tipr_analysis: dict | None,
+    homepage_url: str,
+    existing_entities: dict | None = None,
+    max_pages: int = 25,
+) -> dict:
+    """Extract NLP entities from top pages for better topic clustering.
+
+    Selects pages by importance (PageRank, click depth, hub status) and
+    runs Google NLP analyzeEntities on Trafilatura-extracted content.
+
+    Returns dict of url -> {entities: [...], analyzed_at: "..."}.
+    Budget: ~25 NLP API calls (75 units, well within 5K free tier).
+    """
+    import httpx
+    from datetime import datetime, timezone
+
+    # If we already have enough entity data, skip
+    if existing_entities and len(existing_entities) >= max_pages:
+        logger.info(f"Page entities already exist ({len(existing_entities)} pages), skipping extraction")
+        return existing_entities
+
+    nodes = graph_data.get("nodes", [])
+    if not nodes:
+        return {}
+
+    # Build TIPR lookup for PageRank scores
+    tipr_pages = (tipr_analysis or {}).get("pages", [])
+    tipr_map = {p["url"]: p for p in tipr_pages if isinstance(p, dict)}
+
+    # Score each page for importance
+    scored_pages = []
+    seen_prefixes: set[str] = set()
+    homepage_norm = homepage_url.rstrip("/").lower()
+
+    for node in nodes:
+        url = node.get("id", "")
+        if not url:
+            continue
+
+        tipr = tipr_map.get(url, {})
+        pr_score = tipr.get("pagerank_score", 0) or 0
+        click_depth = node.get("depth", 99)
+        if click_depth is None or click_depth < 0:
+            click_depth = 99
+        inbound = node.get("inbound", 0) or 0
+
+        # URL prefix for directory representation
+        parsed = urlparse(url)
+        segments = [s for s in parsed.path.strip("/").split("/") if s]
+        prefix = segments[0] if segments else "/"
+
+        is_homepage = url.rstrip("/").lower() == homepage_norm
+        is_depth1 = click_depth == 1
+        is_new_prefix = prefix not in seen_prefixes
+
+        # Importance score (higher = more important)
+        importance = (
+            (100.0 if is_homepage else 0) +
+            pr_score * 0.5 +
+            (30.0 if is_depth1 else 0) +
+            (15.0 if is_new_prefix else 0) +
+            inbound * 0.3 +
+            max(0, 10.0 - click_depth * 2.0)
+        )
+
+        scored_pages.append({
+            "url": url,
+            "importance": importance,
+            "prefix": prefix,
+            "title": node.get("label", ""),
+        })
+        if is_new_prefix:
+            seen_prefixes.add(prefix)
+
+    # Sort by importance, take top N
+    scored_pages.sort(key=lambda p: p["importance"], reverse=True)
+    selected_urls = [p["url"] for p in scored_pages[:max_pages]]
+
+    logger.info(f"Selected {len(selected_urls)} pages for NLP entity extraction")
+
+    # Fetch HTML and extract content, then run NLP
+    page_entities: dict = dict(existing_entities or {})
+    analyzed_count = 0
+
+    for i, url in enumerate(selected_urls):
+        # Skip if already analyzed
+        if url in page_entities and page_entities[url].get("entities"):
+            continue
+
+        try:
+            # Fetch HTML
+            async with httpx.AsyncClient(
+                timeout=15.0, follow_redirects=True
+            ) as client:
+                resp = await client.get(url, headers={
+                    "User-Agent": "WAIO-Audit-Bot/1.0 (content extraction)"
+                })
+                resp.raise_for_status()
+                html = resp.text
+
+            # Extract clean text via Trafilatura
+            extracted = extract_content(html, url)
+            if not extracted.clean_text or len(extracted.clean_text.split()) < 30:
+                logger.debug(f"Insufficient content for NLP on {url}")
+                continue
+
+            # Run Google NLP entity analysis
+            entities = await nlp_analyze_entities(extracted.clean_text)
+            if entities:
+                page_entities[url] = {
+                    "entities": [
+                        {
+                            "name": e.name,
+                            "type": e.entity_type,
+                            "salience": round(e.salience, 4),
+                            "wikipedia_url": e.wikipedia_url,
+                            "mentions_count": e.mentions_count,
+                        }
+                        for e in entities[:20]
+                    ],
+                    "analyzed_at": datetime.now(timezone.utc).isoformat(),
+                }
+                analyzed_count += 1
+                logger.info(
+                    f"Entity extraction ({analyzed_count}/{len(selected_urls)}): "
+                    f"{url} — {len(entities)} entities, primary={entities[0].name}"
+                )
+        except Exception as e:
+            logger.debug(f"Entity extraction failed for {url}: {e}")
+
+    logger.info(f"Page entity extraction complete: {analyzed_count} new pages analyzed, {len(page_entities)} total")
+    return page_entities
+
+
+def _extract_lightweight_entities(title: str, url: str) -> list[dict]:
+    """Extract pseudo-entities from title + URL for pages without NLP data.
+
+    Uses simple heuristics: title-case words that aren't common English words,
+    plus URL path segment tokens. Not as accurate as Google NLP but gives
+    every page some entity signal for clustering.
+    """
+    COMMON_WORDS = {
+        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+        "of", "with", "by", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "shall", "can", "this", "that", "these",
+        "those", "it", "its", "from", "how", "what", "why", "when", "where",
+        "who", "which", "your", "our", "my", "his", "her", "their", "all",
+        "each", "every", "both", "few", "more", "most", "other", "some", "such",
+        "no", "not", "only", "own", "same", "so", "than", "too", "very",
+        "about", "home", "page", "blog", "post", "article", "new", "best",
+        "top", "free", "guide", "ultimate", "complete", "step", "tips",
+        "get", "use", "using", "make", "one", "two", "three", "first",
+    }
+
+    entities = []
+    seen = set()
+
+    # Extract from title: multi-word capitalized phrases and significant words
+    if title:
+        # Find capitalized phrases (2+ words that look like proper nouns/names)
+        words = title.split()
+        i = 0
+        while i < len(words):
+            # Look for sequences of capitalized words
+            if words[i][0:1].isupper() and words[i].lower() not in COMMON_WORDS and len(words[i]) > 2:
+                phrase = [words[i]]
+                j = i + 1
+                while j < len(words) and words[j][0:1].isupper() and words[j].lower() not in COMMON_WORDS:
+                    phrase.append(words[j])
+                    j += 1
+                name = " ".join(phrase)
+                name_lower = name.lower()
+                if name_lower not in seen and len(name) > 2:
+                    entities.append({
+                        "name": name,
+                        "type": "INFERRED",
+                        "salience": 0.15 if len(phrase) > 1 else 0.08,
+                    })
+                    seen.add(name_lower)
+                i = j
+            else:
+                # Single significant word
+                w = words[i]
+                wl = w.lower().strip(".,!?:;()[]{}\"'")
+                if wl not in COMMON_WORDS and len(wl) > 3 and wl not in seen:
+                    entities.append({
+                        "name": wl.title(),
+                        "type": "INFERRED",
+                        "salience": 0.05,
+                    })
+                    seen.add(wl)
+                i += 1
+
+    # Extract from URL path segments
+    parsed = urlparse(url)
+    segments = [s for s in parsed.path.strip("/").split("/") if s]
+    for seg in segments:
+        tokens = re.split(r"[-_.]", seg)
+        for tok in tokens:
+            tok_lower = tok.lower()
+            if tok_lower not in COMMON_WORDS and len(tok_lower) > 3 and tok_lower not in seen:
+                entities.append({
+                    "name": tok_lower.title(),
+                    "type": "INFERRED",
+                    "salience": 0.03,
+                })
+                seen.add(tok_lower)
+
+    return entities[:10]
+
+
 async def _enrich_report_from_crawl(
     task_id: str, dfs_client: DataForSEOClient, summary: dict
 ):
@@ -1211,14 +1471,30 @@ async def _enrich_report_from_crawl(
             except Exception as e:
                 logger.warning(f"TIPR analysis failed (non-fatal): {e}", exc_info=True)
 
+        # Multi-page NLP entity extraction for better clustering
+        page_entities: dict = {}
+        existing_report = audit_record.get("report_json") or {}
+        if is_nlp_configured() and graph_data and graph_data.get("nodes"):
+            try:
+                page_entities = await _extract_page_entities(
+                    graph_data=graph_data,
+                    tipr_analysis=tipr_analysis,
+                    homepage_url=homepage_url,
+                    existing_entities=existing_report.get("page_entities") or {},
+                    max_pages=25,
+                )
+                logger.info(f"Page entity extraction: {len(page_entities)} pages analyzed")
+            except Exception as e:
+                logger.warning(f"Page entity extraction failed (non-fatal): {e}", exc_info=True)
+
         # Run semantic topic clustering on the enriched data
         semantic_clusters = None
         try:
-            existing_report = audit_record.get("report_json") or {}
             cluster_pages, cluster_links = prepare_pages_from_report({
                 **existing_report,
                 "link_analysis": link_analysis,
                 "tipr_analysis": tipr_analysis,
+                "page_entities": page_entities,
             })
             if cluster_pages:
                 semantic_clusters = run_topic_clustering(
@@ -1240,6 +1516,7 @@ async def _enrich_report_from_crawl(
             "link_analysis": link_analysis,
             "tipr_analysis": tipr_analysis,
             "semantic_clusters": semantic_clusters,
+            "page_entities": page_entities if page_entities else None,
             "enrichment_status": "complete",
             "enrichment_progress": "Complete",
         }

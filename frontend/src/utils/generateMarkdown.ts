@@ -205,6 +205,9 @@ export function generateMarkdown(report: Record<string, any>): string {
     lines.push('## Topic Clusters (Semantic)');
     lines.push('');
     lines.push(`*Detection method: ${semantic.detection_method} · Quality: ${semantic.quality} (silhouette ${semantic.silhouette_score}) · Entity data: ${semantic.entity_data_coverage} pages*`);
+    if (semantic.total_missing_links != null || semantic.healthy_clusters != null) {
+      lines.push(`*${semantic.healthy_clusters ?? 0} of ${semantic.n_clusters} clusters have healthy linking · ${semantic.total_missing_links ?? 0} missing links detected*`);
+    }
     lines.push('');
     lines.push('| Cluster | Pages | Link Health | Pillar | Content Gaps |');
     lines.push('|---------|-------|:-----------:|--------|:------------:|');
@@ -220,7 +223,8 @@ export function generateMarkdown(report: Record<string, any>): string {
       lines.push('');
       for (const rec of semantic.link_recommendations.slice(0, 20)) {
         const tag = rec.type === 'missing_pillar_link' ? '→ Pillar' : 'Pillar →';
-        lines.push(`- **[${tag}]** ${rec.reason}`);
+        const anchors = rec.suggested_anchors?.length ? ` (anchor: "${rec.suggested_anchors[0]}")` : '';
+        lines.push(`- **[${tag}]** ${rec.reason}${anchors}`);
       }
       if (semantic.link_recommendations.length > 20) {
         lines.push(`- *...and ${semantic.link_recommendations.length - 20} more recommendations*`);
