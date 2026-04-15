@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, FileText, Info, ArrowRightLeft, Shield, CheckCircle2, Brain, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAuditStore } from '../stores/auditStore';
 
 const mdComponents: Components = {
@@ -116,7 +117,7 @@ export default function DashboardSummaryPage() {
         {summary ? (
           <div className="bg-surface-raised border border-border rounded-xl p-8">
             <div className="max-w-none">
-              <ReactMarkdown components={mdComponents}>{summary}</ReactMarkdown>
+              <ReactMarkdown components={mdComponents} remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown>
             </div>
           </div>
         ) : (
