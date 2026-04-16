@@ -120,6 +120,14 @@ def _get_clusters(report: dict) -> dict | None:
     return sc
 
 
+def _get_ai_visibility(report: dict) -> dict | None:
+    """Extract AI Visibility data if available and successfully computed."""
+    aiv = report.get("ai_visibility")
+    if not aiv or aiv.get("last_computed_status") not in ("ok", "partial"):
+        return None
+    return aiv
+
+
 def _composite_category_scores(scores: Dict[str, int]) -> Dict[str, int]:
     """Return the composite (averaged) score per scorecard category.
 
@@ -688,6 +696,33 @@ def _section_strategic_context(report: dict, scores: Dict[str, int]) -> str:
             f"compound into meaningful aggregate lift."
         )
 
+    # AI Visibility context (Phase 3)
+    aiv = _get_ai_visibility(report)
+    if aiv:
+        sov = aiv.get("share_of_voice")
+        mentions_total = aiv.get("mentions_database", {}).get("total", 0)
+        if sov and sov.get("brand_sov") is not None:
+            brand_pct = round(sov["brand_sov"] * 100)
+            comp_sov = sov.get("competitor_sov", {})
+            if comp_sov:
+                top_comp = max(comp_sov.items(), key=lambda x: x[1])
+                lines.append(
+                    f"AI engines currently surface this brand in {brand_pct}% of "
+                    f"category responses, compared to {round(top_comp[1] * 100)}% "
+                    f"for {top_comp[0]}."
+                )
+            else:
+                lines.append(
+                    f"AI engines currently surface this brand in {brand_pct}% of "
+                    f"category responses."
+                )
+        elif mentions_total == 0:
+            lines.append(
+                "The site is not yet appearing in AI-generated search responses — "
+                "an untapped visibility channel where early movers are building "
+                "compounding citation advantage."
+            )
+
     return "\n\n".join(lines)
 
 
@@ -834,6 +869,32 @@ def _section_roi_projection(report: dict, scores: Dict[str, int]) -> str:
 
     if third:
         lines.append(f"- {third}")
+
+    # AI search volume opportunity (Phase 3)
+    aiv = _get_ai_visibility(report)
+    if aiv:
+        ai_search_vol = aiv.get("mentions_database", {}).get("ai_search_volume", 0)
+        if ai_search_vol > 0:
+            lines.append(
+                f"- **AI search opportunity:** This brand already appears in AI "
+                f"responses for queries generating approximately "
+                f"{ai_search_vol:,} monthly searches. Improving content "
+                f"structure and authority signals could increase both the frequency "
+                f"and prominence of these mentions"
+            )
+        elif aiv.get("mentions_database", {}).get("total", 0) == 0:
+            engines = aiv.get("live_test", {}).get("engines", {})
+            ok_count = sum(
+                1 for e in engines.values()
+                if isinstance(e, dict) and e.get("status") == "ok"
+            )
+            if ok_count > 0:
+                lines.append(
+                    f"- **AI search opportunity:** AI engines are responsive to "
+                    f"brand queries ({ok_count}/4 engines returned results) but "
+                    f"the brand is not yet indexed in AI search databases. "
+                    f"Structured content improvements can unlock this channel"
+                )
 
     return "\n".join(lines)
 
@@ -1029,6 +1090,24 @@ def _section_diagnosis(report: dict, scores: Dict[str, int]) -> str:
                 f"authority."
             )
 
+    # AI engine coverage diagnostic (Phase 3)
+    aiv = _get_ai_visibility(report)
+    if aiv:
+        engines = aiv.get("live_test", {}).get("engines", {})
+        low_engines = []
+        for eng_name, eng_data in engines.items():
+            if isinstance(eng_data, dict) and eng_data.get("status") == "ok":
+                if eng_data.get("brand_mentioned_in", 0) < 2:
+                    low_engines.append(eng_name)
+        if low_engines:
+            engine_labels = {"chatgpt": "ChatGPT", "claude": "Claude", "gemini": "Gemini", "perplexity": "Perplexity"}
+            engine_names = ", ".join(engine_labels.get(e, e) for e in low_engines)
+            statements.append(
+                f"AI engine coverage is uneven — {engine_names} return this brand "
+                f"in fewer than 2 of 4 test prompts, indicating gaps in content "
+                f"authority or topical coverage for those platforms."
+            )
+
     # Limit to 5 most impactful statements
     for stmt in statements[:5]:
         lines.append(stmt)
@@ -1071,6 +1150,18 @@ def _section_key_risks(report: dict, scores: Dict[str, int]) -> str:
         risks.append(
             "Low presence in AI-generated answers, where early movers are "
             "establishing lasting citation advantage"
+        )
+
+    # AI indexing risk — based on real AI Visibility data (Phase 3)
+    aiv = _get_ai_visibility(report)
+    if aiv and aiv.get("mentions_database", {}).get("total", 0) == 0:
+        # Replace the generic aeo/rag risk with a data-backed one
+        risks = [r for r in risks if "AI-generated answers" not in r]
+        risks.append(
+            "The brand is not yet indexed by AI search platforms (Google AI "
+            "Overview, ChatGPT). As AI-generated answers capture an increasing "
+            "share of search traffic, absence from these results means losing "
+            "visibility to competitors who are already cited"
         )
 
     # Orphan pages risk (uses real data)
