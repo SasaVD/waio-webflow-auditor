@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { CheckCircle2, XCircle, ChevronDown, Sparkles, Search, MessageSquare } from 'lucide-react';
 import type { EngineResult } from '../../stores/aiVisibilityStore';
 
@@ -124,10 +126,12 @@ export function EngineCard({ engineKey, engine, prompts, totalPrompts }: EngineC
                         </span>
                       )}
                     </div>
-                    <div className="pl-5 text-xs text-text-secondary leading-relaxed max-h-32 overflow-y-auto bg-surface-overlay rounded-lg p-3">
-                      {response.text.length > 600
-                        ? response.text.slice(0, 600) + '…'
-                        : response.text}
+                    <div className="pl-5 text-xs text-text-secondary leading-relaxed max-h-32 overflow-y-auto bg-surface-overlay rounded-lg p-3 prose-sm prose-invert [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_strong]:text-text [&_a]:text-accent [&_a]:no-underline [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h1]:font-bold [&_h2]:font-bold [&_h3]:font-semibold [&_h1]:my-1 [&_h2]:my-1 [&_h3]:my-1">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {response.text.length > 600
+                          ? response.text.slice(0, 600) + '…'
+                          : response.text}
+                      </ReactMarkdown>
                     </div>
                   </div>
                 );
