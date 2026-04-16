@@ -324,12 +324,12 @@ class DataForSEOClient:
     ) -> dict[str, Any]:
         """Get aggregated LLM mention metrics for a brand.
 
-        Uses keyword target to find where brand is mentioned.
-        Returns grouped totals by platform, location, etc.
+        Uses keyword target with brand_entities scope to find where brand
+        is recognized as a named entity (not just substring matching).
         """
         body = [{
             "target": [
-                {"keyword": brand, "search_filter": "include", "search_scope": ["any"]},
+                {"keyword": brand, "search_filter": "include", "search_scope": ["brand_entities"]},
             ],
         }]
         client = await self._get_client()
@@ -348,10 +348,10 @@ class DataForSEOClient:
     async def llm_mentions_search(
         self, brand: str, limit: int = 100,
     ) -> dict[str, Any]:
-        """Search LLM mentions — returns triggering prompts (questions) and answers."""
+        """Search LLM mentions — returns triggering prompts where brand is an entity."""
         body = [{
             "target": [
-                {"keyword": brand, "search_filter": "include", "search_scope": ["any"]},
+                {"keyword": brand, "search_filter": "include", "search_scope": ["brand_entities"]},
             ],
             "limit": min(limit, 1000),
             "order_by": ["ai_search_volume,desc"],
@@ -372,16 +372,25 @@ class DataForSEOClient:
         return {"items": items, "money_spent": cost}
 
     async def llm_mentions_top_pages(
-        self, brand: str, limit: int = 20,
+        self, brand: str, limit: int = 20, use_domain: bool = False,
     ) -> dict[str, Any]:
         """Get top cited pages for a brand from LLM mentions.
 
-        Returns pages grouped with mention counts per platform.
+        When use_domain=True, searches by domain (finds cited pages from
+        the brand's website). When False, searches by keyword in brand_entities.
         """
+        if use_domain:
+            target = [
+                {"domain": brand, "search_filter": "include",
+                 "search_scope": ["sources"], "include_subdomains": True},
+            ]
+        else:
+            target = [
+                {"keyword": brand, "search_filter": "include",
+                 "search_scope": ["brand_entities"]},
+            ]
         body = [{
-            "target": [
-                {"keyword": brand, "search_filter": "include", "search_scope": ["any"]},
-            ],
+            "target": target,
             "items_list_limit": min(limit, 100),
         }]
         client = await self._get_client()

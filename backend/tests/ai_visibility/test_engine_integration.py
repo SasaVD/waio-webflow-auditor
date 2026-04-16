@@ -42,7 +42,7 @@ async def test_fetch_mentions_happy_path():
     }
 
     tracker = CostTracker()
-    result = await fetch_mentions(mock_client, "Belt Creative", tracker)
+    result = await fetch_mentions(mock_client, "Belt Creative", "beltcreative.com", tracker)
 
     assert result.total == 103  # 69 + 34
     assert result.ai_search_volume == 156000  # 120000 + 36000
@@ -64,7 +64,7 @@ async def test_fetch_mentions_aggregated_fails_gracefully():
     mock_client.llm_mentions_top_pages.return_value = {"items": [], "money_spent": 0}
 
     tracker = CostTracker()
-    result = await fetch_mentions(mock_client, "Belt Creative", tracker)
+    result = await fetch_mentions(mock_client, "Belt Creative", "beltcreative.com", tracker)
 
     # Should still return a result with zeros, not raise
     assert result.total == 0

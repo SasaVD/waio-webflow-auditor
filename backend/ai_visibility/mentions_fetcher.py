@@ -11,20 +11,21 @@ logger = logging.getLogger(__name__)
 async def fetch_mentions(
     client: DataForSEOClient,
     brand_name: str,
+    brand_domain: str,
     cost_tracker: CostTracker,
 ) -> MentionsResult:
     """Fetch all LLM Mentions data for a brand.
 
     Makes 3 API calls:
-    1. aggregated_metrics — totals by platform, sources_domain, etc.
-    2. search — triggering prompts (questions that mention the brand)
-    3. top_pages — most cited pages (grouped with per-platform counts)
+    1. aggregated_metrics — totals by platform (brand_entities scope)
+    2. search — triggering prompts that mention the brand entity
+    3. top_pages — most cited pages from brand's domain
 
     All calls are to the pre-indexed database (Google AI Overview + ChatGPT).
     """
     result = MentionsResult()
 
-    # 1. Aggregated metrics
+    # 1. Aggregated metrics (search by brand name in brand_entities scope)
     try:
         agg = await client.llm_mentions_aggregated(brand_name)
         cost_tracker.add(agg.get("money_spent"))
@@ -51,7 +52,7 @@ async def fetch_mentions(
     except Exception as e:
         logger.warning(f"LLM Mentions aggregated failed: {e}")
 
-    # 2. Triggering prompts (search)
+    # 2. Triggering prompts (search by brand name in brand_entities scope)
     try:
         search = await client.llm_mentions_search(brand_name, limit=50)
         cost_tracker.add(search.get("money_spent"))
@@ -70,28 +71,29 @@ async def fetch_mentions(
     except Exception as e:
         logger.warning(f"LLM Mentions search failed: {e}")
 
-    # 3. Top cited pages
-    try:
-        pages = await client.llm_mentions_top_pages(brand_name, limit=20)
-        cost_tracker.add(pages.get("money_spent"))
-        items = pages.get("items", []) or []
+    # 3. Top cited pages (search by domain to find most-referenced brand pages)
+    if brand_domain:
+        try:
+            pages = await client.llm_mentions_top_pages(brand_domain, limit=20, use_domain=True)
+            cost_tracker.add(pages.get("money_spent"))
+            items = pages.get("items", []) or []
 
-        # Response shape: [{key: "url", platform: [{key, mentions, ...}], ...}, ...]
-        for item in items:
-            if isinstance(item, dict):
-                page_url = item.get("key", "")
-                # Sum mentions across all platforms for this page
-                platforms = item.get("platform", []) or []
-                total_mentions = sum(
-                    (p.get("mentions", 0) or 0) for p in platforms if isinstance(p, dict)
-                )
-                result.top_pages.append({
-                    "url": page_url,
-                    "mention_count": total_mentions,
-                })
-        logger.info(f"LLM Mentions top pages: {len(result.top_pages)} pages")
-    except Exception as e:
-        logger.warning(f"LLM Mentions top pages failed: {e}")
+            # Response shape: [{key: "url", platform: [{key, mentions, ...}], ...}, ...]
+            for item in items:
+                if isinstance(item, dict):
+                    page_url = item.get("key", "")
+                    # Sum mentions across all platforms for this page
+                    platforms = item.get("platform", []) or []
+                    total_mentions = sum(
+                        (p.get("mentions", 0) or 0) for p in platforms if isinstance(p, dict)
+                    )
+                    result.top_pages.append({
+                        "url": page_url,
+                        "mention_count": total_mentions,
+                    })
+            logger.info(f"LLM Mentions top pages: {len(result.top_pages)} pages")
+        except Exception as e:
+            logger.warning(f"LLM Mentions top pages failed: {e}")
 
     result.cost_usd = cost_tracker.total  # snapshot at this point
     return result

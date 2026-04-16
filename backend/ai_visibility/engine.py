@@ -95,9 +95,16 @@ async def run_ai_visibility_analysis(
         cost_tracker = CostTracker()
         dfs_client = DataForSEOClient()
 
+        # Extract brand domain from audit URL (used by mentions + SOV)
+        from urllib.parse import urlparse
+        parsed_url = urlparse(audit.get("url", ""))
+        brand_domain = normalize_domain(parsed_url.hostname or "")
+
         try:
             # Stage 4: Fetch LLM Mentions (pre-indexed database)
-            mentions = await fetch_mentions(dfs_client, brand_info.name, cost_tracker)
+            mentions = await fetch_mentions(
+                dfs_client, brand_info.name, brand_domain, cost_tracker,
+            )
 
             # If no competitors yet, try tier 3 (co-mentions) — not implemented in Phase 1
             # Tier 3 would scan mentions data for co-mentioned domains
@@ -108,10 +115,6 @@ async def run_ai_visibility_analysis(
             # Stage 6: Compute SOV (from cross_aggregated, if competitors available)
             sov = None
             if competitors.domains:
-                # Extract brand domain from audit URL
-                from urllib.parse import urlparse
-                parsed_url = urlparse(audit.get("url", ""))
-                brand_domain = normalize_domain(parsed_url.hostname or "")
 
                 all_brands = [brand_domain] + competitors.domains
                 cross_data = await dfs_client.llm_mentions_cross_aggregated(all_brands)
