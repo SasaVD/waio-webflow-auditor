@@ -12,7 +12,9 @@ interface AuditState {
     url: string,
     auditType: 'single' | 'site' | 'competitive',
     competitorUrls?: string[],
-    tier?: 'free' | 'premium'
+    tier?: 'free' | 'premium',
+    aiVisibilityOptIn?: boolean,
+    brandName?: string,
   ) => Promise<void>;
   loadReport: (jobId: string, pageUrl: string) => Promise<void>;
   fetchReport: (auditId: string) => Promise<void>;
@@ -25,7 +27,7 @@ export const useAuditStore = create<AuditState>((set) => ({
   error: null,
   auditedUrl: '',
 
-  runAudit: async (url, auditType, competitorUrls = [], tier = 'free') => {
+  runAudit: async (url, auditType, competitorUrls = [], tier = 'free', aiVisibilityOptIn, brandName) => {
     set({ isLoading: true, error: null, report: null, auditedUrl: url });
 
     let apiUrl = `${apiBase}/api/audit`;
@@ -36,7 +38,12 @@ export const useAuditStore = create<AuditState>((set) => ({
     try {
       let body: Record<string, unknown>;
       if (tier === 'premium' && auditType === 'single') {
-        body = { url, competitor_urls: competitorUrls };
+        body = {
+          url,
+          competitor_urls: competitorUrls,
+          ai_visibility_opt_in: aiVisibilityOptIn ?? true,
+          ...(brandName ? { brand_name: brandName } : {}),
+        };
       } else if (auditType === 'site') {
         body = { url, max_pages: 50 };
       } else if (auditType === 'competitive') {
