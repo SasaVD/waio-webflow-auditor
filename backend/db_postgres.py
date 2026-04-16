@@ -278,7 +278,7 @@ async def get_audit_by_id(audit_id) -> Optional[Dict[str, Any]]:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """SELECT id, url, tier, audit_type, overall_score, overall_label,
-                      report_json, created_at, detected_cms
+                      report_json, created_at, detected_cms, competitor_urls
                FROM audits WHERE id = $1""",
             audit_id if isinstance(audit_id, uuid.UUID) else uuid.UUID(str(audit_id)),
         )
@@ -297,6 +297,7 @@ async def get_audit_by_id(audit_id) -> Optional[Dict[str, Any]]:
         "report_json": report,
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "detected_cms": row["detected_cms"],
+        "competitor_urls": list(row["competitor_urls"]) if row["competitor_urls"] else [],
     }
 
 

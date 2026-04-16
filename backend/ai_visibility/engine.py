@@ -77,7 +77,7 @@ async def run_ai_visibility_analysis(
             return
 
         # Stage 2: Resolve competitors
-        competitor_urls = report.get("competitor_urls") or []
+        competitor_urls = audit.get("competitor_urls") or report.get("competitor_urls") or []
         # Also check the PremiumAuditRequest competitor_urls stored in competitive_data
         competitive_data = report.get("competitive_data")
         competitors = resolve_competitors(
