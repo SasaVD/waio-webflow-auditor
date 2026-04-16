@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { Eye, ChevronRight, Loader2, Target } from 'lucide-react';
 import { useAIVisibilityStore } from '../../stores/aiVisibilityStore';
 import { AIVisibilityModal } from './AIVisibilityModal';

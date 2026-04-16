@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import {
   Eye,
   RefreshCw,

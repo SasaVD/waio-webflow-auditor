@@ -1,5 +1,5 @@
 import { TrendingUp, Target } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 
 interface ZeroMentionsCardProps {
   brandName: string;

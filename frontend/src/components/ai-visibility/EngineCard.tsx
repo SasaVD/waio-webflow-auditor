@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, XCircle, ChevronDown, Sparkles, Search, MessageSquare } from 'lucide-react';
 import type { EngineResult } from '../../stores/aiVisibilityStore';
 
