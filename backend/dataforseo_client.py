@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 _sandbox_val = os.environ.get("DATAFORSEO_USE_SANDBOX", "true").lower()
 _USE_SANDBOX = _sandbox_val not in ("false", "0", "no")
 BASE_URL = "https://sandbox.dataforseo.com/v3/on_page" if _USE_SANDBOX else "https://api.dataforseo.com/v3/on_page"
+# AI Optimization API — always live, no sandbox equivalent
+AI_OPT_BASE_URL = "https://api.dataforseo.com/v3/ai_optimization"
 
 if _USE_SANDBOX:
     logger.info("Using DataForSEO SANDBOX mode (set DATAFORSEO_USE_SANDBOX=false for live)")
@@ -295,6 +297,114 @@ class DataForSEOClient:
             "items": result.get("items", []),
             "total_count": result.get("items_count", 0),
         }
+
+    # ── AI Optimization (LLM Mentions + Responses) ────────────────
+
+    async def llm_mentions_aggregated(
+        self, brand: str, engines: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Get aggregated LLM mention data for a brand.
+        Engines: ['google_ai_overview', 'chatgpt']. Defaults to both."""
+        if engines is None:
+            engines = ["google_ai_overview", "chatgpt"]
+        body = [{"keyword": brand, "engines": engines}]
+        client = await self._get_client()
+        resp = await client.post(
+            f"{AI_OPT_BASE_URL}/ai_search/aggregated_search_data/live",
+            json=body,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._check_response(data)
+        tasks = data.get("tasks", [])
+        cost = tasks[0].get("cost", 0) if tasks else 0
+        result = tasks[0]["result"][0] if tasks and tasks[0].get("result") else {}
+        return {"result": result, "money_spent": cost}
+
+    async def llm_mentions_search(
+        self, brand: str, limit: int = 100,
+    ) -> dict[str, Any]:
+        """Search LLM mentions for triggering prompts and cited pages."""
+        body = [{"keyword": brand, "limit": min(limit, 1000)}]
+        client = await self._get_client()
+        resp = await client.post(
+            f"{AI_OPT_BASE_URL}/ai_search/search_data/live",
+            json=body,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._check_response(data)
+        tasks = data.get("tasks", [])
+        cost = tasks[0].get("cost", 0) if tasks else 0
+        items = []
+        if tasks and tasks[0].get("result"):
+            items = tasks[0]["result"][0].get("items", [])
+        return {"items": items, "money_spent": cost}
+
+    async def llm_mentions_top_pages(
+        self, brand: str, limit: int = 20,
+    ) -> dict[str, Any]:
+        """Get top cited pages for a brand from LLM mentions."""
+        body = [{"keyword": brand, "limit": min(limit, 100)}]
+        client = await self._get_client()
+        resp = await client.post(
+            f"{AI_OPT_BASE_URL}/ai_search/top_pages/live",
+            json=body,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._check_response(data)
+        tasks = data.get("tasks", [])
+        cost = tasks[0].get("cost", 0) if tasks else 0
+        items = []
+        if tasks and tasks[0].get("result"):
+            items = tasks[0]["result"][0].get("items", [])
+        return {"items": items, "money_spent": cost}
+
+    async def llm_mentions_cross_aggregated(
+        self, brands: list[str],
+    ) -> dict[str, Any]:
+        """Get cross-aggregated mention counts for brand + competitors.
+        Used for Share of Voice calculation."""
+        body = [{"keywords": brands}]
+        client = await self._get_client()
+        resp = await client.post(
+            f"{AI_OPT_BASE_URL}/ai_search/cross_aggregated_search_data/live",
+            json=body,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._check_response(data)
+        tasks = data.get("tasks", [])
+        cost = tasks[0].get("cost", 0) if tasks else 0
+        items = []
+        if tasks and tasks[0].get("result"):
+            items = tasks[0]["result"][0].get("items", [])
+        return {"items": items, "money_spent": cost}
+
+    async def llm_response(
+        self, prompt: str, engine: str, timeout: float = 120.0,
+    ) -> dict[str, Any]:
+        """Send a prompt to an LLM engine and capture the response.
+
+        Engines: 'chatgpt', 'claude', 'gemini', 'perplexity'.
+        Can take up to 120s per call.
+        """
+        body = [{"prompt": prompt, "engine": engine}]
+        client = await self._get_client()
+        # Override timeout for LLM responses — they can be slow
+        resp = await client.post(
+            f"{AI_OPT_BASE_URL}/llm_responses/live",
+            json=body,
+            timeout=httpx.Timeout(timeout, connect=10.0),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._check_response(data)
+        tasks = data.get("tasks", [])
+        cost = tasks[0].get("cost", 0) if tasks else 0
+        result = tasks[0]["result"][0] if tasks and tasks[0].get("result") else {}
+        return {"result": result, "money_spent": cost}
 
 
 def is_configured() -> bool:
