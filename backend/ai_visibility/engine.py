@@ -178,6 +178,21 @@ async def run_ai_visibility_analysis(
         except Exception as e:
             logger.warning(f"AI Visibility: failed to update tracking columns: {e}")
 
+        # Regenerate executive summary with AI Visibility data included (Phase 3)
+        try:
+            from executive_summary_generator import generate_executive_summary
+            refreshed = await get_audit_by_id(audit_id)
+            if refreshed:
+                full_rpt = refreshed.get("report_json") or {}
+                if isinstance(full_rpt, str):
+                    full_rpt = json.loads(full_rpt)
+                competitive_data = full_rpt.get("competitive_data")
+                new_summary = generate_executive_summary(full_rpt, competitive_data)
+                await update_audit_report(audit_id, {"executive_summary": new_summary})
+                logger.info(f"Executive summary regenerated with AI Visibility data: {len(new_summary)} chars")
+        except Exception as e:
+            logger.warning(f"Post-AI-Visibility summary regeneration failed (non-fatal): {e}")
+
         logger.info(
             f"AI Visibility complete for {audit_id}: "
             f"status={status}, cost=${this_run_cost:.2f}, "
