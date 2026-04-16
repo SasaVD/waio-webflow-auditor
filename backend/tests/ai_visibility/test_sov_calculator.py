@@ -6,14 +6,29 @@ from ai_visibility.sov_calculator import calculate_sov
 from ai_visibility.schema import SOVResult
 
 
+def _make_cross_data(brand_mentions: list[tuple[str, int]]) -> dict:
+    """Build cross_aggregated response matching real API shape.
+
+    brand_mentions: list of (aggregation_key, total_mentions) tuples.
+    """
+    items = [
+        {
+            "key": key,
+            "platform": [
+                {"key": "google", "mentions": count, "ai_search_volume": 0, "impressions": 0},
+            ],
+        }
+        for key, count in brand_mentions
+    ]
+    return {"result": {"total": {}, "items": items}}
+
+
 def test_basic_sov():
-    cross_data = {
-        "items": [
-            {"keyword": "beltcreative.com", "count": 100},
-            {"keyword": "webflow.com", "count": 300},
-            {"keyword": "wix.com", "count": 200},
-        ]
-    }
+    cross_data = _make_cross_data([
+        ("beltcreative.com", 100),
+        ("webflow.com", 300),
+        ("wix.com", 200),
+    ])
     result = calculate_sov(
         cross_aggregated_data=cross_data,
         brand_domain="beltcreative.com",
@@ -27,12 +42,10 @@ def test_basic_sov():
 
 
 def test_brand_not_in_data():
-    cross_data = {
-        "items": [
-            {"keyword": "webflow.com", "count": 300},
-            {"keyword": "wix.com", "count": 200},
-        ]
-    }
+    cross_data = _make_cross_data([
+        ("webflow.com", 300),
+        ("wix.com", 200),
+    ])
     result = calculate_sov(
         cross_aggregated_data=cross_data,
         brand_domain="beltcreative.com",
@@ -44,7 +57,7 @@ def test_brand_not_in_data():
 
 def test_empty_data():
     result = calculate_sov(
-        cross_aggregated_data={"items": []},
+        cross_aggregated_data={"result": {"items": []}},
         brand_domain="beltcreative.com",
         competitor_domains=["webflow.com"],
     )
@@ -64,11 +77,9 @@ def test_none_data():
 
 
 def test_no_competitors():
-    cross_data = {
-        "items": [
-            {"keyword": "beltcreative.com", "count": 100},
-        ]
-    }
+    cross_data = _make_cross_data([
+        ("beltcreative.com", 100),
+    ])
     result = calculate_sov(
         cross_aggregated_data=cross_data,
         brand_domain="beltcreative.com",
@@ -80,14 +91,44 @@ def test_no_competitors():
 
 
 def test_sov_capped_at_one():
-    cross_data = {
-        "items": [
-            {"keyword": "beltcreative.com", "count": 500},
-        ]
-    }
+    cross_data = _make_cross_data([
+        ("beltcreative.com", 500),
+    ])
     result = calculate_sov(
         cross_aggregated_data=cross_data,
         brand_domain="beltcreative.com",
         competitor_domains=["webflow.com"],
     )
     assert result.brand_sov <= 1.0
+
+
+def test_multi_platform_sov():
+    """Mentions from multiple platforms should be summed."""
+    cross_data = {
+        "result": {
+            "total": {},
+            "items": [
+                {
+                    "key": "brand.com",
+                    "platform": [
+                        {"key": "google", "mentions": 60, "ai_search_volume": 0, "impressions": 0},
+                        {"key": "chat_gpt", "mentions": 40, "ai_search_volume": 0, "impressions": 0},
+                    ],
+                },
+                {
+                    "key": "competitor.com",
+                    "platform": [
+                        {"key": "google", "mentions": 100, "ai_search_volume": 0, "impressions": 0},
+                    ],
+                },
+            ],
+        }
+    }
+    result = calculate_sov(
+        cross_aggregated_data=cross_data,
+        brand_domain="brand.com",
+        competitor_domains=["competitor.com"],
+    )
+    # brand: 60+40=100, competitor: 100, total: 200
+    assert abs(result.brand_sov - 0.5) < 0.001
+    assert result.total_mentions_analyzed == 200

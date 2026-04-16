@@ -19,25 +19,24 @@ async def test_fetch_mentions_happy_path():
     mock_client = AsyncMock()
     mock_client.llm_mentions_aggregated.return_value = {
         "result": {
-            "total_count": 103,
-            "ai_search_volume": 156000,
-            "impressions": 42300,
-            "engines": {
-                "google_ai_overview": {"count": 69},
-                "chatgpt": {"count": 34},
+            "total": {
+                "platform": [
+                    {"key": "google", "mentions": 69, "ai_search_volume": 120000, "impressions": 30000},
+                    {"key": "chat_gpt", "mentions": 34, "ai_search_volume": 36000, "impressions": 12300},
+                ],
             },
         },
         "money_spent": 0.05,
     }
     mock_client.llm_mentions_search.return_value = {
         "items": [
-            {"keyword": "best agencies 2026", "count": 8, "engine": "chatgpt"},
+            {"question": "best agencies 2026", "platform": "google", "model_name": "google_ai_overview", "ai_search_volume": 8000},
         ],
         "money_spent": 0.03,
     }
     mock_client.llm_mentions_top_pages.return_value = {
         "items": [
-            {"url": "https://example.com/page1", "count": 12},
+            {"key": "https://example.com/page1", "platform": [{"key": "google", "mentions": 12, "ai_search_volume": 0, "impressions": 0}]},
         ],
         "money_spent": 0.02,
     }
@@ -45,11 +44,15 @@ async def test_fetch_mentions_happy_path():
     tracker = CostTracker()
     result = await fetch_mentions(mock_client, "Belt Creative", tracker)
 
-    assert result.total == 103
-    assert result.ai_search_volume == 156000
-    assert result.by_platform["google_ai_overview"] == 69
+    assert result.total == 103  # 69 + 34
+    assert result.ai_search_volume == 156000  # 120000 + 36000
+    assert result.by_platform["google"] == 69
+    assert result.by_platform["chat_gpt"] == 34
     assert len(result.triggering_prompts) == 1
+    assert result.triggering_prompts[0]["prompt"] == "best agencies 2026"
     assert len(result.top_pages) == 1
+    assert result.top_pages[0]["url"] == "https://example.com/page1"
+    assert result.top_pages[0]["mention_count"] == 12
     assert abs(tracker.total - 0.10) < 0.001
 
 

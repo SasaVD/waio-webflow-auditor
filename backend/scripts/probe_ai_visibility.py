@@ -31,56 +31,100 @@ async def main():
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(headers=headers, timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-        # --- Probe 1: LLM Mentions Aggregated ---
-        print("\n=== Probe 1: LLM Mentions Aggregated (brand='webflow') ===")
+    async with httpx.AsyncClient(headers=headers, timeout=httpx.Timeout(60.0, connect=10.0)) as client:
+        # --- Probe 1: LLM Mentions Aggregated Metrics ---
+        print("\n=== Probe 1: LLM Mentions Aggregated Metrics (keyword='webflow') ===")
         try:
             resp = await client.post(
-                f"{AI_OPT_BASE_URL}/ai_search/aggregated_search_data/live",
-                json=[{"keyword": "webflow", "engines": ["google_ai_overview", "chatgpt"]}],
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            status = data.get("status_code", 0)
-            print(f"  Status: {status} ({data.get('status_message', '?')})")
-            tasks = data.get("tasks", [])
-            if tasks and tasks[0].get("result"):
-                result = tasks[0]["result"][0]
-                print(f"  Total mentions: {result.get('total_count', '?')}")
-                print(f"  Money spent: ${tasks[0].get('cost', 0):.4f}")
-            else:
-                print(f"  No result data. Full response:")
-                print(f"  {json.dumps(data, indent=2)[:1000]}")
-        except Exception as e:
-            print(f"  FAILED: {e}")
-            print("  >>> AI Optimization subscription may not be active <<<")
-
-        # --- Probe 2: LLM Responses (single prompt, gemini) ---
-        print("\n=== Probe 2: LLM Responses (engine='gemini', 1 prompt) ===")
-        try:
-            resp = await client.post(
-                f"{AI_OPT_BASE_URL}/llm_responses/live",
+                f"{AI_OPT_BASE_URL}/llm_mentions/aggregated_metrics/live",
                 json=[{
-                    "prompt": "best website builders 2026",
-                    "engine": "gemini",
+                    "target": [
+                        {"keyword": "webflow", "search_filter": "include", "search_scope": ["any"]},
+                    ],
                 }],
             )
+            print(f"  HTTP Status: {resp.status_code}")
             resp.raise_for_status()
             data = resp.json()
             status = data.get("status_code", 0)
-            print(f"  Status: {status} ({data.get('status_message', '?')})")
+            print(f"  API Status: {status} ({data.get('status_message', '?')})")
             tasks = data.get("tasks", [])
-            if tasks and tasks[0].get("result"):
-                result = tasks[0]["result"][0]
-                text = result.get("response_text", "")
-                print(f"  Response length: {len(text)} chars")
-                print(f"  First 200 chars: {text[:200]}...")
-                print(f"  Money spent: ${tasks[0].get('cost', 0):.4f}")
+            if tasks:
+                task = tasks[0]
+                print(f"  Task Status: {task.get('status_code')} ({task.get('status_message', '?')})")
+                print(f"  Cost: ${task.get('cost', 0):.4f}")
+                if task.get("result"):
+                    result = task["result"][0]
+                    total = result.get("total", {})
+                    platforms = total.get("platform", [])
+                    print(f"  Platform groups: {len(platforms)}")
+                    for p in platforms:
+                        print(f"    {p.get('key')}: mentions={p.get('mentions')}, volume={p.get('ai_search_volume')}, impressions={p.get('impressions')}")
+                    # Show top-level keys for schema verification
+                    print(f"  Result top-level keys: {list(result.keys())}")
+                    if total:
+                        print(f"  Total group keys: {list(total.keys())}")
+                else:
+                    print(f"  No result data.")
+                    print(f"  Task keys: {list(task.keys())}")
             else:
-                print(f"  No result data. Full response:")
+                print(f"  No tasks returned. Full response:")
+                print(f"  {json.dumps(data, indent=2)[:1000]}")
+        except httpx.HTTPStatusError as e:
+            print(f"  HTTP ERROR {e.response.status_code}: {e.response.text[:500]}")
+            print("  >>> AI Optimization subscription may not be active <<<")
+        except Exception as e:
+            print(f"  FAILED: {e}")
+
+        # --- Probe 2: LLM Responses (ChatGPT, cheapest model) ---
+        print("\n=== Probe 2: LLM Responses (engine=chat_gpt, model=gpt-4o-mini) ===")
+        try:
+            resp = await client.post(
+                f"{AI_OPT_BASE_URL}/chat_gpt/llm_responses/live",
+                json=[{
+                    "user_prompt": "best website builders 2026",
+                    "model_name": "gpt-4o-mini",
+                }],
+                timeout=httpx.Timeout(120.0, connect=10.0),
+            )
+            print(f"  HTTP Status: {resp.status_code}")
+            resp.raise_for_status()
+            data = resp.json()
+            status = data.get("status_code", 0)
+            print(f"  API Status: {status} ({data.get('status_message', '?')})")
+            tasks = data.get("tasks", [])
+            if tasks:
+                task = tasks[0]
+                print(f"  Task Status: {task.get('status_code')} ({task.get('status_message', '?')})")
+                print(f"  Task Cost: ${task.get('cost', 0):.4f}")
+                if task.get("result"):
+                    result = task["result"][0]
+                    print(f"  Model: {result.get('model_name')}")
+                    print(f"  Input tokens: {result.get('input_tokens')}")
+                    print(f"  Output tokens: {result.get('output_tokens')}")
+                    print(f"  money_spent: ${result.get('money_spent', 0):.4f}")
+                    # Extract text from sections
+                    texts = []
+                    for item in result.get("items", []):
+                        print(f"  Item type: {item.get('type')}")
+                        if item.get("type") == "message":
+                            for section in item.get("sections", []):
+                                print(f"    Section type: {section.get('type')}, text length: {len(section.get('text', ''))}")
+                                if section.get("text"):
+                                    texts.append(section["text"])
+                    full_text = "\n\n".join(texts)
+                    print(f"  Full response length: {len(full_text)} chars")
+                    print(f"  First 300 chars: {full_text[:300]}...")
+                    print(f"  Result top-level keys: {list(result.keys())}")
+                else:
+                    print(f"  No result data.")
+            else:
+                print(f"  No tasks. Full response:")
                 print(f"  {json.dumps(data, indent=2)[:1000]}")
         except httpx.TimeoutException:
-            print("  TIMEOUT (>30s). LLM Responses can take up to 120s in production.")
+            print("  TIMEOUT (>120s). LLM Responses can be slow.")
+        except httpx.HTTPStatusError as e:
+            print(f"  HTTP ERROR {e.response.status_code}: {e.response.text[:500]}")
         except Exception as e:
             print(f"  FAILED: {e}")
 

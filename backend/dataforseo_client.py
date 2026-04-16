@@ -299,18 +299,42 @@ class DataForSEOClient:
         }
 
     # ── AI Optimization (LLM Mentions + Responses) ────────────────
+    # Docs: https://docs.dataforseo.com/v3/ai_optimization-overview/
+    # LLM Mentions use keyword/domain targets, not flat keyword strings.
+    # LLM Responses use engine-specific URL paths, not engine in body.
+
+    # Default model per engine — cheapest reasonable option
+    LLM_DEFAULT_MODELS = {
+        "chatgpt": "gpt-4o-mini",
+        "claude": "claude-sonnet-4-5",
+        "gemini": "gemini-2.5-flash",
+        "perplexity": "sonar",
+    }
+
+    # Engine name → URL path segment
+    LLM_ENGINE_PATH = {
+        "chatgpt": "chat_gpt",
+        "claude": "claude",
+        "gemini": "gemini",
+        "perplexity": "perplexity",
+    }
 
     async def llm_mentions_aggregated(
-        self, brand: str, engines: list[str] | None = None,
+        self, brand: str,
     ) -> dict[str, Any]:
-        """Get aggregated LLM mention data for a brand.
-        Engines: ['google_ai_overview', 'chatgpt']. Defaults to both."""
-        if engines is None:
-            engines = ["google_ai_overview", "chatgpt"]
-        body = [{"keyword": brand, "engines": engines}]
+        """Get aggregated LLM mention metrics for a brand.
+
+        Uses keyword target to find where brand is mentioned.
+        Returns grouped totals by platform, location, etc.
+        """
+        body = [{
+            "target": [
+                {"keyword": brand, "search_filter": "include", "search_scope": ["any"]},
+            ],
+        }]
         client = await self._get_client()
         resp = await client.post(
-            f"{AI_OPT_BASE_URL}/ai_search/aggregated_search_data/live",
+            f"{AI_OPT_BASE_URL}/llm_mentions/aggregated_metrics/live",
             json=body,
         )
         resp.raise_for_status()
@@ -324,11 +348,17 @@ class DataForSEOClient:
     async def llm_mentions_search(
         self, brand: str, limit: int = 100,
     ) -> dict[str, Any]:
-        """Search LLM mentions for triggering prompts and cited pages."""
-        body = [{"keyword": brand, "limit": min(limit, 1000)}]
+        """Search LLM mentions — returns triggering prompts (questions) and answers."""
+        body = [{
+            "target": [
+                {"keyword": brand, "search_filter": "include", "search_scope": ["any"]},
+            ],
+            "limit": min(limit, 1000),
+            "order_by": ["ai_search_volume,desc"],
+        }]
         client = await self._get_client()
         resp = await client.post(
-            f"{AI_OPT_BASE_URL}/ai_search/search_data/live",
+            f"{AI_OPT_BASE_URL}/llm_mentions/search/live",
             json=body,
         )
         resp.raise_for_status()
@@ -338,17 +368,25 @@ class DataForSEOClient:
         cost = tasks[0].get("cost", 0) if tasks else 0
         items = []
         if tasks and tasks[0].get("result"):
-            items = tasks[0]["result"][0].get("items", [])
+            items = tasks[0]["result"][0].get("items", []) or []
         return {"items": items, "money_spent": cost}
 
     async def llm_mentions_top_pages(
         self, brand: str, limit: int = 20,
     ) -> dict[str, Any]:
-        """Get top cited pages for a brand from LLM mentions."""
-        body = [{"keyword": brand, "limit": min(limit, 100)}]
+        """Get top cited pages for a brand from LLM mentions.
+
+        Returns pages grouped with mention counts per platform.
+        """
+        body = [{
+            "target": [
+                {"keyword": brand, "search_filter": "include", "search_scope": ["any"]},
+            ],
+            "items_list_limit": min(limit, 100),
+        }]
         client = await self._get_client()
         resp = await client.post(
-            f"{AI_OPT_BASE_URL}/ai_search/top_pages/live",
+            f"{AI_OPT_BASE_URL}/llm_mentions/top_pages/live",
             json=body,
         )
         resp.raise_for_status()
@@ -358,18 +396,30 @@ class DataForSEOClient:
         cost = tasks[0].get("cost", 0) if tasks else 0
         items = []
         if tasks and tasks[0].get("result"):
-            items = tasks[0]["result"][0].get("items", [])
+            items = tasks[0]["result"][0].get("items", []) or []
         return {"items": items, "money_spent": cost}
 
     async def llm_mentions_cross_aggregated(
         self, brands: list[str],
     ) -> dict[str, Any]:
-        """Get cross-aggregated mention counts for brand + competitors.
-        Used for Share of Voice calculation."""
-        body = [{"keywords": brands}]
+        """Get cross-aggregated mention metrics for brand + competitors.
+
+        Each brand is a separate target with its own aggregation_key.
+        Used for Share of Voice calculation.
+        """
+        targets = [
+            {
+                "aggregation_key": brand,
+                "target": [
+                    {"keyword": brand, "search_filter": "include", "search_scope": ["any"]},
+                ],
+            }
+            for brand in brands
+        ]
+        body = [{"targets": targets}]
         client = await self._get_client()
         resp = await client.post(
-            f"{AI_OPT_BASE_URL}/ai_search/cross_aggregated_search_data/live",
+            f"{AI_OPT_BASE_URL}/llm_mentions/cross_aggregated_metrics/live",
             json=body,
         )
         resp.raise_for_status()
@@ -377,10 +427,10 @@ class DataForSEOClient:
         self._check_response(data)
         tasks = data.get("tasks", [])
         cost = tasks[0].get("cost", 0) if tasks else 0
-        items = []
+        result = {}
         if tasks and tasks[0].get("result"):
-            items = tasks[0]["result"][0].get("items", [])
-        return {"items": items, "money_spent": cost}
+            result = tasks[0]["result"][0] or {}
+        return {"result": result, "money_spent": cost}
 
     async def llm_response(
         self, prompt: str, engine: str, timeout: float = 120.0,
@@ -388,13 +438,15 @@ class DataForSEOClient:
         """Send a prompt to an LLM engine and capture the response.
 
         Engines: 'chatgpt', 'claude', 'gemini', 'perplexity'.
-        Can take up to 120s per call.
+        Engine name maps to a URL path segment (chatgpt → chat_gpt).
+        Returns normalized {result: {response_text, ...}, money_spent}.
         """
-        body = [{"prompt": prompt, "engine": engine}]
+        engine_path = self.LLM_ENGINE_PATH.get(engine, engine)
+        model_name = self.LLM_DEFAULT_MODELS.get(engine, "gpt-4o-mini")
+        body = [{"user_prompt": prompt[:500], "model_name": model_name}]
         client = await self._get_client()
-        # Override timeout for LLM responses — they can be slow
         resp = await client.post(
-            f"{AI_OPT_BASE_URL}/llm_responses/live",
+            f"{AI_OPT_BASE_URL}/{engine_path}/llm_responses/live",
             json=body,
             timeout=httpx.Timeout(timeout, connect=10.0),
         )
@@ -403,8 +455,27 @@ class DataForSEOClient:
         self._check_response(data)
         tasks = data.get("tasks", [])
         cost = tasks[0].get("cost", 0) if tasks else 0
-        result = tasks[0]["result"][0] if tasks and tasks[0].get("result") else {}
-        return {"result": result, "money_spent": cost}
+        raw_result = tasks[0]["result"][0] if tasks and tasks[0].get("result") else {}
+
+        # Extract response text from nested items → sections → text
+        texts = []
+        for item in raw_result.get("items", []):
+            if item.get("type") == "message":
+                for section in item.get("sections", []):
+                    if section.get("text"):
+                        texts.append(section["text"])
+        response_text = "\n\n".join(texts)
+
+        money = raw_result.get("money_spent", 0) or cost
+        return {
+            "result": {
+                "response_text": response_text,
+                "model_name": raw_result.get("model_name", model_name),
+                "input_tokens": raw_result.get("input_tokens", 0),
+                "output_tokens": raw_result.get("output_tokens", 0),
+            },
+            "money_spent": money,
+        }
 
 
 def is_configured() -> bool:
