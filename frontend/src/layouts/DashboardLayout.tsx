@@ -34,6 +34,7 @@ import {
   AlertTriangle,
   RefreshCw,
   Sparkles,
+  Eye,
 } from 'lucide-react';
 import { PILLAR_LABELS } from '../constants/pillarLabels';
 import { Globe } from 'lucide-react';
@@ -66,6 +67,7 @@ const navGroups: NavGroup[] = [
       { icon: FileJson, label: PILLAR_LABELS.structured_data, href: 'pillar/rich-search-presence' },
       { icon: Layers, label: PILLAR_LABELS.rag_readiness, href: 'pillar/ai-retrieval-readiness' },
       { icon: Brain, label: 'Content Intelligence', href: 'content-intelligence' },
+      { icon: Eye, label: 'AI Visibility', href: 'ai-visibility' },
     ],
   },
   {

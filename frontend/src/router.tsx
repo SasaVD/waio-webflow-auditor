@@ -44,6 +44,9 @@ const DashboardPageAuditPage = lazy(
 const DashboardLinkIntelligencePage = lazy(
   () => import('./pages/DashboardLinkIntelligencePage')
 );
+const DashboardAIVisibilityPage = lazy(
+  () => import('./pages/DashboardAIVisibilityPage')
+);
 const AdminPanel = lazy(
   () => import('./components/auth/AdminPanel')
 );
@@ -182,6 +185,14 @@ export const router = createBrowserRouter([
         element: (
           <Suspense fallback={dashboardFallback}>
             <DashboardLinkIntelligencePage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'ai-visibility',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardAIVisibilityPage />
           </Suspense>
         ),
       },
