@@ -25,7 +25,9 @@ interface AuditFormProps {
     url: string,
     auditType: 'single' | 'site' | 'competitive',
     competitorUrls?: string[],
-    tier?: 'free' | 'premium'
+    tier?: 'free' | 'premium',
+    aiVisibilityOptIn?: boolean,
+    brandName?: string,
   ) => void;
   isLoading: boolean;
   error: string | null;
@@ -54,6 +56,8 @@ export const AuditForm: React.FC<AuditFormProps> = ({
   const [activeTab, setActiveTab] = useState('single');
   const [competitors, setCompetitors] = useState<string[]>(['']);
   const [scope, setScope] = useState<'domain' | 'subdomain' | 'subfolder'>('domain');
+  const [aiVisibility, setAiVisibility] = useState(true);
+  const [brandName, setBrandName] = useState('');
 
   const handleTabChange = (value: string) => {
     if (value === 'fullsite' && !isAuthenticated) {
@@ -84,7 +88,14 @@ export const AuditForm: React.FC<AuditFormProps> = ({
         .filter((c) => c.trim())
         .map((c) => normalizeUrl(c));
 
-      onRunAudit(submitUrl, 'single', validCompetitors, 'premium');
+      onRunAudit(
+        submitUrl,
+        'single',
+        validCompetitors,
+        'premium',
+        aiVisibility,
+        brandName.trim() || undefined,
+      );
     }
   };
 
@@ -284,6 +295,48 @@ export const AuditForm: React.FC<AuditFormProps> = ({
                       <Plus size={14} /> Add Competitor
                     </button>
                   )}
+                </div>
+
+                {/* AI Visibility */}
+                <div className="space-y-2 pt-2 border-t border-border">
+                  <label className="flex items-center gap-3 px-1 py-2 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={aiVisibility}
+                      onChange={(e) => setAiVisibility(e.target.checked)}
+                      className="w-4 h-4 rounded border-border accent-accent"
+                      disabled={isLoading}
+                    />
+                    <div className="flex-1">
+                      <span className="text-sm font-semibold text-text group-hover:text-accent transition-colors">
+                        Include AI Visibility Analysis
+                      </span>
+                      <span className="block text-[11px] text-text-muted mt-0.5">
+                        Test brand presence across ChatGPT, Claude, Gemini & Perplexity (~$0.30)
+                      </span>
+                    </div>
+                  </label>
+                  <AnimatePresence>
+                    {aiVisibility && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="bg-surface-raised border border-border rounded-lg p-1">
+                          <input
+                            type="text"
+                            className="w-full bg-transparent px-3 py-2 text-sm font-medium text-text placeholder:text-text-muted focus:outline-none"
+                            placeholder="Brand name (optional — auto-detected if blank)"
+                            value={brandName}
+                            onChange={(e) => setBrandName(e.target.value)}
+                            disabled={isLoading}
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 {/* Submit */}
