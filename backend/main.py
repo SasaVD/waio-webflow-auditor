@@ -115,6 +115,8 @@ class PremiumAuditRequest(BaseModel):
     nlp_classification: bool = True
     nlp_entity_analysis: bool = True
     nlp_sentiment: bool = False
+    ai_visibility_opt_in: bool = True
+    brand_name: str | None = None
 
 class ExportRequest(BaseModel):
     report: dict
@@ -555,6 +557,11 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
                         "link_analysis", "crawl_stats", "migration_assessment"]
         populated = [k for k in premium_keys if report.get(k) is not None]
         logger.info(f"Premium data populated: {populated}")
+
+        # Persist AI Visibility opt-in state for the background enrichment task
+        report["ai_visibility_opt_in"] = request.ai_visibility_opt_in
+        if request.brand_name:
+            report["ai_visibility_brand_name"] = request.brand_name
 
         await save_audit_history(
             url, audit_type,
