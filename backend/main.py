@@ -66,6 +66,9 @@ from tipr_engine import run_tipr_analysis
 from topic_clustering_engine import run_topic_clustering, prepare_pages_from_report
 from link_data_export import generate_link_data_excel, generate_link_data_csv_zip
 from knowledge_base_generator import generate_knowledge_base, export_jsonl_bytes
+from ai_visibility import run_ai_visibility_analysis
+from ai_visibility.brand_resolver import resolve_brand
+from ai_visibility.schema import BrandExtractionError
 from google_nlp_client import (
     classify_text as nlp_classify_text,
     analyze_entities as nlp_analyze_entities,
@@ -2267,6 +2270,182 @@ async def export_link_data(audit_id: str, format: str = "xlsx"):
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f'attachment; filename="WAIO-Link-Data-{safe_url}.xlsx"'},
         )
+
+
+# --- AI Visibility Endpoints (Phase 1) ---
+
+@app.get("/api/audit/{audit_id}/ai-visibility/brand-preview")
+async def ai_visibility_brand_preview(audit_id: str):
+    """Pre-flight for AI Visibility: returns auto-extracted brand, industry, competitors."""
+    audit = await get_audit_by_id(audit_id)
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+
+    report = audit.get("report_json") or {}
+    nlp_data = report.get("nlp_analysis") or {}
+
+    if not nlp_data:
+        raise HTTPException(
+            status_code=409,
+            detail="NLP enrichment not yet complete — AI Visibility requires brand extraction",
+        )
+
+    entities = nlp_data.get("entities") or []
+
+    # Try to auto-extract brand
+    auto_extracted = None
+    auto_salience = None
+    try:
+        brand_info = resolve_brand(brand_override=None, nlp_entities=entities)
+        auto_extracted = brand_info.name
+        auto_salience = brand_info.salience
+    except BrandExtractionError:
+        pass
+
+    # Check for existing override
+    existing_viz = report.get("ai_visibility") or {}
+    override = existing_viz.get("brand_name") if existing_viz.get("brand_name_source") == "override" else None
+
+    # Competitor preview
+    competitor_urls = report.get("competitor_urls") or []
+    competitive_data = report.get("competitive_data")
+    user_provided = []
+    auto_detected = []
+    if competitor_urls:
+        from ai_visibility.competitor_resolver import normalize_domain
+        user_provided = [normalize_domain(u) for u in competitor_urls if normalize_domain(u)]
+    elif competitive_data and competitive_data.get("rankings"):
+        from ai_visibility.competitor_resolver import normalize_domain
+        auto_detected = [
+            normalize_domain(r.get("url", ""))
+            for r in competitive_data["rankings"]
+            if normalize_domain(r.get("url", ""))
+        ]
+
+    return {
+        "auto_extracted": auto_extracted,
+        "auto_extracted_salience": round(auto_salience, 4) if auto_salience else None,
+        "override": override,
+        "detected_industry": nlp_data.get("detected_industry"),
+        "top_nlp_entity": nlp_data.get("primary_entity"),
+        "competitors_preview": {
+            "user_provided": user_provided,
+            "auto_detected": auto_detected,
+            "tier_3_fallback_available": True,
+        },
+        "cumulative_cost_usd": existing_viz.get("cumulative_cost_usd", 0),
+        "run_count": existing_viz.get("run_count", 0),
+    }
+
+
+@app.post("/api/audit/{audit_id}/recompute-ai-visibility", status_code=202)
+async def recompute_ai_visibility(audit_id: str, body: dict = Body(...)):
+    """Kick off AI Visibility analysis as a background task."""
+    audit = await get_audit_by_id(audit_id)
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+
+    # Check DataForSEO credentials
+    if not is_dataforseo_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="DataForSEO credentials not configured",
+        )
+
+    report = audit.get("report_json") or {}
+    existing_viz = report.get("ai_visibility") or {}
+
+    # Prevent concurrent runs
+    if existing_viz.get("last_computed_status") == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="AI Visibility analysis is already running",
+        )
+
+    # Budget cap check
+    monthly_cap = float(os.environ.get("AI_VISIBILITY_MONTHLY_CAP_USD", "100.0"))
+    try:
+        from db_postgres import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT COALESCE(SUM(ai_visibility_cumulative_cost_usd), 0) as total
+                   FROM audits WHERE last_ai_visibility_run_at >= date_trunc('month', now())"""
+            )
+            month_spend = float(row["total"]) if row else 0.0
+    except Exception:
+        month_spend = 0.0
+
+    estimated_cost = 2.00
+    if month_spend + estimated_cost + 1.0 > monthly_cap:
+        raise HTTPException(
+            status_code=503,
+            detail="AI Visibility monthly budget cap reached. Try again next month or contact admin.",
+        )
+
+    brand_name = body.get("brand_name", "").strip() if body.get("brand_name") else None
+
+    # Write running state immediately so poller sees it
+    from datetime import datetime as dt, timezone as tz
+    started_at = dt.now(tz.utc).isoformat()
+    await update_audit_report(audit_id, {
+        "ai_visibility": {
+            **existing_viz,
+            "last_computed_status": "running",
+            "started_at": started_at,
+        }
+    })
+
+    # Save brand override if provided
+    if brand_name:
+        try:
+            from db_postgres import get_pool
+            pool = await get_pool()
+            aid = uuid.UUID(str(audit_id)) if not isinstance(audit_id, uuid.UUID) else audit_id
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE audits SET brand_name_override = $1 WHERE id = $2",
+                    brand_name, aid,
+                )
+        except Exception as e:
+            logger.warning(f"Failed to save brand_name_override: {e}")
+
+    # Fire background task
+    asyncio.create_task(
+        run_ai_visibility_analysis(audit_id, brand_override=brand_name)
+    )
+
+    return {
+        "status": "running",
+        "started_at": started_at,
+        "estimated_duration_seconds": 150,
+        "previous_cost_usd": existing_viz.get("cumulative_cost_usd", 0),
+        "estimated_this_run_usd": estimated_cost,
+    }
+
+
+@app.get("/api/audit/{audit_id}/ai-visibility")
+async def get_ai_visibility(audit_id: str):
+    """Poll target for AI Visibility status/results."""
+    audit = await get_audit_by_id(audit_id)
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+
+    report = audit.get("report_json") or {}
+    viz = report.get("ai_visibility")
+
+    if not viz:
+        return {"status": "not_computed"}
+
+    status = viz.get("last_computed_status", "not_computed")
+    if status == "running":
+        return {
+            "status": "running",
+            "started_at": viz.get("started_at"),
+        }
+
+    # Complete (ok, partial, or failed)
+    return {"status": status, **viz}
 
 
 # Mount static files
