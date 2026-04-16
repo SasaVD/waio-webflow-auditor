@@ -1581,6 +1581,25 @@ async def _enrich_report_from_crawl(
         except Exception as e:
             logger.warning(f"Post-enrichment summary regeneration failed (non-fatal): {e}")
 
+        # ── Spawn AI Visibility as a sibling task (Phase 3) ──
+        try:
+            enriched_for_aiv = await get_audit_by_id(audit_id)
+            if enriched_for_aiv:
+                aiv_rpt = enriched_for_aiv.get("report_json") or {}
+                if isinstance(aiv_rpt, str):
+                    aiv_rpt = json.loads(aiv_rpt)
+                if aiv_rpt.get("ai_visibility_opt_in"):
+                    brand_override = aiv_rpt.get("ai_visibility_brand_name")
+                    asyncio.create_task(
+                        run_ai_visibility_analysis(
+                            audit_id=str(audit_id),
+                            brand_override=brand_override,
+                        )
+                    )
+                    logger.info(f"AI Visibility sibling task launched for audit {audit_id}")
+        except Exception as e:
+            logger.warning(f"Failed to launch AI Visibility sibling task (non-fatal): {e}")
+
         # Also persist link graph edges to the dedicated table
         try:
             edges = []
