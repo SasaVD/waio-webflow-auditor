@@ -17,6 +17,17 @@ from urllib.parse import urlparse
 from jinja2 import Environment, select_autoescape
 from weasyprint import HTML
 
+try:
+    import markdown as _markdown_lib
+    _HAS_MARKDOWN_LIB = True
+except ImportError:
+    _HAS_MARKDOWN_LIB = False
+
+try:
+    from executive_summary_generator import _translate_finding
+except ImportError:
+    _translate_finding = None
+
 
 # ---------------------------------------------------------------------------
 # Brand colors and pillar config
@@ -132,6 +143,119 @@ def _domain(url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# SVG / chart helpers — rendered inline in the PDF as real vectors
+# ---------------------------------------------------------------------------
+
+def _render_score_ring_svg(score: int, size: int = 220) -> str:
+    """Render a circular score gauge as inline SVG.
+
+    The ring track is a soft white against the dark cover background;
+    the arc sweep uses the brand-aligned score color.
+    """
+    try:
+        s = max(0, min(100, int(score)))
+    except (TypeError, ValueError):
+        s = 0
+    color = _score_color(s)
+    if s >= 80:
+        track_color = "rgba(255,255,255,0.12)"
+    else:
+        track_color = "rgba(255,255,255,0.10)"
+    radius = 88
+    circumference = 2 * 3.141592653589793 * radius
+    dash = (s / 100) * circumference
+    gap = circumference - dash
+    return f'''<svg width="{size}pt" height="{size}pt" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="110" cy="110" r="{radius}" fill="none" stroke="{track_color}" stroke-width="14"/>
+      <circle cx="110" cy="110" r="{radius}" fill="none" stroke="{color}" stroke-width="14"
+              stroke-dasharray="{dash:.2f} {gap:.2f}" stroke-dashoffset="0"
+              stroke-linecap="round" transform="rotate(-90 110 110)"/>
+      <text x="110" y="108" text-anchor="middle" font-family="Plus Jakarta Sans, Inter, sans-serif"
+            font-size="56" font-weight="900" fill="{color}">{s}</text>
+      <text x="110" y="138" text-anchor="middle" font-family="Inter, sans-serif"
+            font-size="13" fill="#94A3B8" letter-spacing="1">/ 100</text>
+    </svg>'''
+
+
+def _render_pillar_bar_chart_svg(pillar_groups: list[dict]) -> str:
+    """Horizontal bar chart of all 10 pillar scores grouped by weight bucket.
+
+    Color-coded green/yellow/orange/red by score bucket. Weight percentage
+    is labelled beside each pillar name.
+    """
+    # Flatten cards in display order
+    rows: list[dict] = []
+    for g in pillar_groups or []:
+        for p in g.get("cards") or []:
+            rows.append(p)
+    if not rows:
+        return ""
+
+    row_h = 30
+    top_pad = 18
+    bottom_pad = 18
+    label_w = 220
+    bar_left = label_w + 10
+    bar_right_pad = 60
+    total_w = 720
+    bar_w = total_w - bar_left - bar_right_pad
+    total_h = top_pad + bottom_pad + row_h * len(rows)
+
+    svg_parts = [
+        f'<svg width="100%" viewBox="0 0 {total_w} {total_h}" xmlns="http://www.w3.org/2000/svg" '
+        'font-family="Inter, system-ui, sans-serif">'
+    ]
+    # Light vertical gridlines at 25/50/75/100
+    for pct in (25, 50, 75, 100):
+        x = bar_left + (pct / 100) * bar_w
+        svg_parts.append(
+            f'<line x1="{x:.1f}" y1="{top_pad}" x2="{x:.1f}" y2="{total_h - bottom_pad / 2}" '
+            'stroke="#E2E8F0" stroke-width="0.5" stroke-dasharray="2,3"/>'
+        )
+        svg_parts.append(
+            f'<text x="{x:.1f}" y="{total_h - 2}" text-anchor="middle" '
+            f'font-size="9" fill="#94A3B8">{pct}</text>'
+        )
+
+    for i, p in enumerate(rows):
+        y = top_pad + i * row_h
+        score = int(p.get("score") or 0)
+        color = p.get("color") or _score_color(score)
+        label = p.get("label") or ""
+        weight = p.get("weight") or 0
+        bar_length = max(0.0, min(1.0, score / 100)) * bar_w
+
+        # Pillar name label
+        svg_parts.append(
+            f'<text x="{label_w}" y="{y + row_h / 2 + 4}" text-anchor="end" '
+            f'font-size="11" font-weight="600" fill="#0F172A">{_html.escape(label)}</text>'
+        )
+        # Weight suffix
+        svg_parts.append(
+            f'<text x="{label_w}" y="{y + row_h / 2 + 16}" text-anchor="end" '
+            f'font-size="9" fill="#94A3B8">{weight}% weight</text>'
+        )
+        # Track
+        svg_parts.append(
+            f'<rect x="{bar_left}" y="{y + 6}" width="{bar_w}" height="14" '
+            'rx="3" ry="3" fill="#F1F5F9"/>'
+        )
+        # Fill
+        svg_parts.append(
+            f'<rect x="{bar_left}" y="{y + 6}" width="{bar_length:.1f}" height="14" '
+            f'rx="3" ry="3" fill="{color}"/>'
+        )
+        # Score number to the right of the bar
+        svg_parts.append(
+            f'<text x="{bar_left + bar_w + 8}" y="{y + 18}" '
+            f'font-size="12" font-weight="700" fill="{color}">{score}</text>'
+        )
+
+    svg_parts.append("</svg>")
+    return "".join(svg_parts)
+
+
+# ---------------------------------------------------------------------------
 # Minimal, safe markdown -> HTML converter
 # ---------------------------------------------------------------------------
 
@@ -145,17 +269,22 @@ def _render_inline(text: str) -> str:
 
 
 def markdown_to_html(md: str) -> str:
-    """Tiny markdown converter.
+    """Markdown converter for the executive summary.
 
-    Handles:
-      - ## and ### headings
-      - blank-line-separated paragraphs
-      - unordered lists (- or *)
-      - ordered lists (1. 2. ...)
-      - **bold** inline
+    Uses python-markdown with the `tables`, `fenced_code`, and `nl2br`
+    extensions when available so GFM pipe-tables render as real HTML
+    tables. Falls back to a minimal in-module converter when the library
+    is missing (keeps local dev unblocked without the extra dep).
     """
     if not md:
         return ""
+
+    if _HAS_MARKDOWN_LIB:
+        return _markdown_lib.markdown(
+            md,
+            extensions=["tables", "fenced_code"],
+            output_format="html5",
+        )
 
     lines = md.replace("\r\n", "\n").split("\n")
     out: list[str] = []
@@ -170,6 +299,19 @@ def markdown_to_html(md: str) -> str:
             out.append(f"<p>{_render_inline(text)}</p>")
         buffer.clear()
 
+    def _is_table_row(s: str) -> bool:
+        return s.startswith("|") and s.endswith("|") and s.count("|") >= 2
+
+    def _is_table_sep(s: str) -> bool:
+        # "| --- | :---: | --- |" — cells of only dashes/colons/spaces
+        if not _is_table_row(s):
+            return False
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        return all(re.fullmatch(r":?-{3,}:?", c) for c in cells) and bool(cells)
+
+    def _split_row(s: str) -> list[str]:
+        return [c.strip() for c in s.strip("|").split("|")]
+
     para_buf: list[str] = []
 
     while i < n:
@@ -180,6 +322,32 @@ def markdown_to_html(md: str) -> str:
         if not stripped:
             flush_paragraph(para_buf)
             i += 1
+            continue
+
+        # GFM pipe table: header | separator | body-rows
+        if (
+            _is_table_row(stripped)
+            and i + 1 < n
+            and _is_table_sep(lines[i + 1].strip())
+        ):
+            flush_paragraph(para_buf)
+            headers = _split_row(stripped)
+            i += 2  # skip header + separator
+            body_rows: list[list[str]] = []
+            while i < n and _is_table_row(lines[i].strip()):
+                body_rows.append(_split_row(lines[i].strip()))
+                i += 1
+            table_parts = ["<table>", "<thead><tr>"]
+            for h in headers:
+                table_parts.append(f"<th>{_render_inline(h)}</th>")
+            table_parts.append("</tr></thead><tbody>")
+            for row in body_rows:
+                table_parts.append("<tr>")
+                for cell in row:
+                    table_parts.append(f"<td>{_render_inline(cell)}</td>")
+                table_parts.append("</tr>")
+            table_parts.append("</tbody></table>")
+            out.append("".join(table_parts))
             continue
 
         # Heading ###
@@ -297,9 +465,17 @@ def _build_pillars(report: dict) -> list[dict]:
 
 
 def _build_tipr(report: dict) -> dict:
-    """TIPR summary, top pages, and top recommendations."""
-    link_analysis = report.get("link_analysis") or {}
-    tipr = link_analysis.get("tipr_analysis") or {}
+    """TIPR summary, top pages, and top recommendations.
+
+    TIPR data lives at the TOP LEVEL of the report as `tipr_analysis`,
+    not nested under `link_analysis`. Total pages and orphan counts are
+    derived from the pages list (the summary dict only carries the
+    quadrant counts).
+    """
+    tipr = report.get("tipr_analysis") or {}
+    # Legacy fallback in case an older report shape nested it
+    if not tipr:
+        tipr = (report.get("link_analysis") or {}).get("tipr_analysis") or {}
 
     if not tipr:
         return {"available": False}
@@ -308,49 +484,141 @@ def _build_tipr(report: dict) -> dict:
     pages = tipr.get("pages") or []
     recs = tipr.get("recommendations") or []
 
-    # Top 10 pages by TIPR rank (already sorted best-first by engine)
+    # Derive totals that the engine's summary block doesn't include directly
+    total_pages = summary.get("total_pages") or len(pages)
+    orphan_count = summary.get("orphan_count")
+    if orphan_count is None:
+        orphan_count = sum(
+            1 for p in pages
+            if isinstance(p, dict)
+            and (p.get("click_depth") == -1 or (p.get("inbound_count") or 0) == 0)
+        )
+
+    # Top 10 pages by TIPR rank
+    sorted_pages = sorted(
+        [p for p in pages if isinstance(p, dict)],
+        key=lambda p: p.get("tipr_rank") if isinstance(p.get("tipr_rank"), (int, float)) else 999999,
+    )
     top_pages = []
-    for p in pages[:10]:
+    for p in sorted_pages[:10]:
+        classification = (p.get("classification") or "").lower()
         top_pages.append({
             "url": _short_url(p.get("url", ""), 60),
-            "classification": (p.get("classification") or "").replace("_", " ").title(),
+            "classification": classification.replace("_", " ").title(),
             "class_color": {
                 "star": GREEN,
                 "hoarder": "#F59E0B",
                 "waster": BLUE,
                 "dead weight": "#94A3B8",
                 "dead_weight": "#94A3B8",
-            }.get((p.get("classification") or "").lower(), "#64748B"),
+            }.get(classification, "#64748B"),
             "inbound": p.get("inbound_count") or 0,
             "outbound": p.get("outbound_count") or 0,
-            "score": round(p.get("pagerank_score") or 0, 1),
+            "score": round(p.get("tipr_score") or p.get("pagerank_score") or 0, 1),
         })
 
+    # Sort recs by priority (high > medium > low) then cap at 10
+    priority_rank = {"high": 0, "medium": 1, "low": 2}
+    sorted_recs = sorted(
+        [r for r in recs if isinstance(r, dict)],
+        key=lambda r: priority_rank.get((r.get("priority") or "").lower(), 3),
+    )
     top_recs = []
-    for r in recs[:10]:
+    for r in sorted_recs[:10]:
+        priority = (r.get("priority") or "").lower()
+        # Strip markdown bold from reason — WeasyPrint will render the escaped text
+        reason_clean = re.sub(r"\*\*([^*]+?)\*\*", r"\1", r.get("reason") or "")
         top_recs.append({
             "source": _short_url(r.get("source_url", ""), 45),
             "target": _short_url(r.get("target_url", ""), 45),
-            "reason": r.get("reason") or "",
-            "priority": (r.get("priority") or "").title(),
+            "reason": reason_clean,
+            "priority": priority.title(),
             "priority_color": {
-                "High": SEVERITY_COLORS["high"],
-                "Medium": SEVERITY_COLORS["medium"],
-                "Low": SEVERITY_COLORS["low"],
-            }.get((r.get("priority") or "").title(), "#64748B"),
+                "high": SEVERITY_COLORS["high"],
+                "medium": SEVERITY_COLORS["medium"],
+                "low": SEVERITY_COLORS["low"],
+            }.get(priority, "#64748B"),
+            "impact": r.get("expected_impact") or "",
         })
+
+    stars = int(summary.get("stars") or 0)
+    hoarders = int(summary.get("hoarders") or 0)
+    wasters = int(summary.get("wasters") or 0)
+    dead_weight = int(summary.get("dead_weight") or 0)
+
+    def _pct(n: int) -> int:
+        return round((n / total_pages) * 100) if total_pages else 0
 
     return {
         "available": True,
-        "total_pages": summary.get("total_pages") or len(pages),
-        "stars": summary.get("stars") or 0,
-        "hoarders": summary.get("hoarders") or 0,
-        "wasters": summary.get("wasters") or 0,
-        "dead_weight": summary.get("dead_weight") or 0,
-        "orphan_count": summary.get("orphan_count") or 0,
+        "total_pages": total_pages,
+        "stars": stars,
+        "stars_pct": _pct(stars),
+        "hoarders": hoarders,
+        "hoarders_pct": _pct(hoarders),
+        "wasters": wasters,
+        "wasters_pct": _pct(wasters),
+        "dead_weight": dead_weight,
+        "dead_weight_pct": _pct(dead_weight),
+        "orphan_count": orphan_count,
+        "orphan_pct": _pct(orphan_count),
         "top_pages": top_pages,
         "top_recs": top_recs,
     }
+
+
+_ENTITY_TYPE_LABELS = {
+    "ORGANIZATION": "Organization",
+    "PERSON": "Person",
+    "LOCATION": "Location",
+    "EVENT": "Event",
+    "WORK_OF_ART": "Creative Work",
+    "CONSUMER_GOOD": "Product",
+    "PRICE": "Price",
+    "DATE": "Date",
+    "NUMBER": "Number",
+    "PHONE_NUMBER": "Phone",
+    "ADDRESS": "Address",
+    "OTHER": "Topic",
+}
+
+
+def _humanize_entity_type(raw_type: str) -> str:
+    if not raw_type:
+        return ""
+    return _ENTITY_TYPE_LABELS.get(raw_type.upper(), raw_type.replace("_", " ").title())
+
+
+def _filter_entities(raw_entities: list[dict]) -> list[dict]:
+    """Filter low-value entities and humanize types.
+
+    Drops entries with salience < 0.04 and type=="OTHER" entries below 0.10.
+    If fewer than 5 survive, relaxes the threshold to 0.02 so the section
+    never feels empty.
+    """
+    def _pick(threshold: float, other_threshold: float) -> list[dict]:
+        out: list[dict] = []
+        for e in raw_entities:
+            if not isinstance(e, dict):
+                continue
+            sal = float(e.get("salience") or 0)
+            etype = (e.get("type") or e.get("entity_type") or "").upper()
+            if sal < threshold:
+                continue
+            if etype == "OTHER" and sal < other_threshold:
+                continue
+            out.append({
+                "name": e.get("name", ""),
+                "salience": round(sal, 3),
+                "frequency": e.get("mentions_count") or e.get("frequency") or 0,
+                "type": _humanize_entity_type(etype),
+            })
+        return out[:10]
+
+    entities = _pick(0.04, 0.10)
+    if len(entities) < 5:
+        entities = _pick(0.02, 0.05)
+    return entities
 
 
 def _build_content_intel(report: dict) -> dict:
@@ -383,26 +651,16 @@ def _build_content_intel(report: dict) -> dict:
                 if not name:
                     continue
                 sal = float(e.get("salience") or 0)
-                slot = agg.setdefault(name, {"name": name, "salience_sum": 0.0, "count": 0, "type": e.get("type") or e.get("entity_type") or ""})
-                slot["salience_sum"] += sal
-                slot["count"] += 1
-        entities = sorted(
-            ({"name": v["name"], "salience": round(v["salience_sum"], 3), "frequency": v["count"], "type": v["type"]}
-             for v in agg.values()),
-            key=lambda e: (e["salience"], e["frequency"]),
+                slot = agg.setdefault(name, {"name": name, "salience": 0.0, "mentions_count": 0, "type": e.get("type") or e.get("entity_type") or ""})
+                slot["salience"] += sal
+                slot["mentions_count"] += 1
+        raw_entities = sorted(
+            agg.values(),
+            key=lambda e: (e["salience"], e["mentions_count"]),
             reverse=True,
-        )[:10]
-    else:
-        entities = []
-        for e in raw_entities[:10]:
-            if not isinstance(e, dict):
-                continue
-            entities.append({
-                "name": e.get("name", ""),
-                "salience": round(float(e.get("salience") or 0), 3),
-                "frequency": e.get("mentions_count") or e.get("frequency") or 0,
-                "type": e.get("type") or e.get("entity_type") or "",
-            })
+        )
+
+    entities = _filter_entities(raw_entities)
 
     return {
         "available": bool(industry or entities),
@@ -410,6 +668,90 @@ def _build_content_intel(report: dict) -> dict:
         "industry_confidence": round(industry_conf, 2) if isinstance(industry_conf, (int, float)) else None,
         "entities": entities,
     }
+
+
+_BRAND_BOLD_RE = re.compile(r"\*\*([^*\n]{2,60}?)\*\*")
+_BRAND_NUMBERED_RE = re.compile(r"\*\*\s*\d+\.\s+([^*\n]{2,60}?)\*\*")
+_BRAND_STOPWORDS = {
+    # Generic headings / section labels that appear as bold markdown
+    "full-service agencies", "boutique/specialized agencies", "what to consider",
+    "key features", "pricing", "overview", "summary", "pros", "cons",
+    "strengths", "weaknesses", "notes", "conclusion", "introduction",
+    "top agencies comparison", "key strengths", "notable mentions",
+    "recommendation", "recommendations", "our pick",
+    # Common section words that slip through markdown bolding
+    "agency", "company", "companies", "services", "price", "rating",
+    "review", "reviews", "source", "sources", "note", "notes",
+    "specialties", "specialty", "founded", "headquarters", "category",
+    "minimum project size", "average hourly rate",
+}
+
+
+def _clean_brand_candidate(raw: str) -> str:
+    """Strip leading numbering, trailing punctuation, inline roles, etc."""
+    s = raw.strip()
+    # Strip leading "1. ", "2. "
+    s = re.sub(r"^\s*\d+[.)]\s+", "", s)
+    # Strip trailing punctuation and leading/trailing whitespace
+    s = s.strip(" -–—:;.,()[]")
+    # Drop trailing parenthetical descriptions
+    s = re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
+    return s
+
+
+def _extract_discovery_brands(engines: dict, own_brand: str, max_brands: int = 15) -> list[dict]:
+    """Extract brand names from AI responses to discovery prompts.
+
+    LLM responses routinely bold brand names using `**Brand**` markdown.
+    We walk every engine's `responses_by_prompt`, collect bold matches
+    from discovery-category responses (prompt IDs 1-3), filter generic
+    headings, and return the top N by mention count.
+    """
+    if not isinstance(engines, dict):
+        return []
+    own_lower = (own_brand or "").strip().lower()
+    counts: dict[str, int] = {}
+    for engine_data in engines.values():
+        if not isinstance(engine_data, dict):
+            continue
+        rbp = engine_data.get("responses_by_prompt") or {}
+        if not isinstance(rbp, dict):
+            continue
+        for prompt_id, resp in rbp.items():
+            # ID 4 is reputation prompt — excluded from "brands in your category"
+            try:
+                if int(str(prompt_id)) == 4:
+                    continue
+            except (TypeError, ValueError):
+                pass
+            text = ""
+            if isinstance(resp, dict):
+                text = resp.get("text") or ""
+            elif isinstance(resp, str):
+                text = resp
+            if not text:
+                continue
+            # Combine both regex patterns to catch numbered + free-form bolds
+            candidates = set(_BRAND_BOLD_RE.findall(text))
+            for raw in candidates:
+                name = _clean_brand_candidate(raw)
+                if not name:
+                    continue
+                lower = name.lower()
+                if lower == own_lower:
+                    continue
+                if lower in _BRAND_STOPWORDS:
+                    continue
+                # Skip obvious non-brand headings (long phrases with common words only)
+                if len(name) > 50 or len(name) < 2:
+                    continue
+                # Must contain at least one letter
+                if not re.search(r"[A-Za-z]", name):
+                    continue
+                counts[name] = counts.get(name, 0) + 1
+
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:max_brands]
+    return [{"name": n, "count": c} for n, c in ranked]
 
 
 def _build_ai_visibility(report: dict) -> dict:
@@ -480,7 +822,42 @@ def _build_ai_visibility(report: dict) -> dict:
             "text": p.get("text") or "",
         })
 
-    zero_state = total_mentions == 0 and len(platforms) > 0
+    # Competitive brand intelligence: who DOES get cited in discovery prompts
+    discovery_brands = _extract_discovery_brands(engines, brand)
+
+    # Status framing + estimated reach from mentions_database
+    mentions_db = viz.get("mentions_database") or {}
+    total_db_mentions = int(mentions_db.get("total") or 0)
+    ai_search_volume = int(mentions_db.get("ai_search_volume") or 0)
+    impressions = int(mentions_db.get("impressions") or 0)
+
+    zero_state = total_mentions == 0 and total_db_mentions == 0 and len(platforms) > 0
+
+    if zero_state:
+        status_headline = "Untapped AI discovery channel"
+        status_body = (
+            f"{brand} is not yet appearing in AI-generated responses for "
+            "category searches. This represents an untapped channel — "
+            "competitors who establish AI visibility now build compounding advantage."
+        )
+    elif total_db_mentions > 0:
+        reach_parts = []
+        if ai_search_volume:
+            reach_parts.append(f"{ai_search_volume:,} monthly AI searches")
+        if impressions:
+            reach_parts.append(f"{impressions:,} impressions tracked")
+        reach = " · ".join(reach_parts) if reach_parts else "tracked impressions pending"
+        status_headline = f"{total_db_mentions} AI responses cite {brand}"
+        status_body = (
+            f"Your brand appears in {total_db_mentions} AI-generated responses "
+            f"({reach})."
+        )
+    else:
+        status_headline = "Category reputation only"
+        status_body = (
+            f"{brand} is returned when directly queried, but is not cited in "
+            "discovery prompts — where buyers compare options without naming brands."
+        )
 
     return {
         "available": True,
@@ -492,6 +869,9 @@ def _build_ai_visibility(report: dict) -> dict:
         "sov_rows": sov_rows,
         "has_sov": bool(sov_rows),
         "prompts": prompt_rows,
+        "discovery_brands": discovery_brands,
+        "status_headline": status_headline,
+        "status_body": status_body,
     }
 
 
@@ -589,6 +969,35 @@ def _build_clusters(report: dict) -> dict:
     }
 
 
+_AXE_RULE_PREFIX_RE = re.compile(r"^axe rule '([^']+)':\s*", re.IGNORECASE)
+_SCHEMA_PATH_RE = re.compile(r"\b\w+(?:\.\w+){2,}(?:\[\])?")
+
+
+def _humanize_finding_description(raw: str, pillar_key: str) -> str:
+    """Translate a raw finding description into an executive-friendly sentence.
+
+    Uses the canonical translator from executive_summary_generator when
+    available so the PDF text matches the on-dashboard summary wording.
+    Falls back to stripping the `Axe rule '<id>':` prefix and any trailing
+    Schema.org property paths.
+    """
+    desc = (raw or "").strip()
+    if not desc:
+        return ""
+    if _translate_finding is not None:
+        try:
+            translated = _translate_finding(desc, pillar_key)
+            if translated:
+                return translated
+        except Exception:
+            pass
+    # Fallback: strip raw Axe prefix and schema property paths
+    cleaned = _AXE_RULE_PREFIX_RE.sub("", desc).strip()
+    cleaned = _SCHEMA_PATH_RE.sub("", cleaned).strip()
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    return cleaned or desc
+
+
 def _build_priority_actions(report: dict) -> list[dict]:
     """Aggregate critical+high findings across all pillars, sorted by severity."""
     categories = report.get("categories") or {}
@@ -622,12 +1031,14 @@ def _build_priority_actions(report: dict) -> list[dict]:
                 sev = (f.get("severity") or "").lower()
                 if sev not in ("critical", "high"):
                     continue
+                raw_desc = f.get("description") or ""
+                description = _humanize_finding_description(raw_desc, pillar_key)
                 aggregated.append({
                     "severity": sev.title(),
                     "severity_color": _severity_color(sev),
                     "pillar": pillar_label,
                     "check": check_name.replace("_", " ").title(),
-                    "description": f.get("description") or "",
+                    "description": description,
                     "recommendation": f.get("recommendation") or "",
                     "credibility": f.get("credibility_anchor") or f.get("why_it_matters") or "",
                     "sev_rank": 0 if sev == "critical" else 1,
@@ -1100,6 +1511,26 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .exec li { margin-bottom: 3pt; }
   .exec h2 { font-size: 14pt; margin-top: 14pt; }
   .exec h3 { font-size: 12pt; margin-top: 12pt; color: {{ accent }}; }
+  .exec table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12pt 0;
+    font-size: 10pt;
+  }
+  .exec th, .exec td {
+    border: 1px solid #E2E8F0;
+    padding: 6pt 8pt;
+    text-align: left;
+    vertical-align: top;
+  }
+  .exec th {
+    background: #F8FAFC;
+    font-weight: 600;
+    color: #0F172A;
+  }
+  .exec tbody tr:nth-child(even) td {
+    background: #FAFBFC;
+  }
 
   .badge {
     display: inline-block;
