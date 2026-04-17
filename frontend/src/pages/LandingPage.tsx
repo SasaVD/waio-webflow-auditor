@@ -3,6 +3,11 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { AuditForm } from '../components/AuditForm';
 import { AuditProgress } from '../components/audit/AuditProgress';
 import { useAuditStore } from '../stores/auditStore';
+import { ThreeAudiencesSection } from '../components/landing/ThreeAudiencesSection';
+import { PillarsByWeightSection } from '../components/landing/PillarsByWeightSection';
+import { FreeVsPremiumSection } from '../components/landing/FreeVsPremiumSection';
+import { DifferentiatorsSection } from '../components/landing/DifferentiatorsSection';
+import { FinalCTASection } from '../components/landing/FinalCTASection';
 
 export function LandingPage() {
   const navigate = useNavigate();
@@ -41,5 +46,16 @@ export function LandingPage() {
     return <AuditProgress isLoading={isLoading} />;
   }
 
-  return <AuditForm onRunAudit={runAudit} isLoading={isLoading} error={error} />;
+  return (
+    <>
+      <section id="audit-form" className="scroll-mt-20">
+        <AuditForm onRunAudit={runAudit} isLoading={isLoading} error={error} />
+      </section>
+      <ThreeAudiencesSection />
+      <PillarsByWeightSection />
+      <FreeVsPremiumSection />
+      <DifferentiatorsSection />
+      <FinalCTASection />
+    </>
+  );
 }

@@ -3,16 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import * as Tabs from '@radix-ui/react-tabs';
 import {
   ArrowRight,
-  Shield,
-  Code2,
-  FileJson,
-  Accessibility,
-  Paintbrush,
-  BookOpen,
-  Layers,
-  Radio,
-  ShieldCheck,
-  Link2,
   Plus,
   Crown,
   X,
@@ -32,19 +22,6 @@ interface AuditFormProps {
   isLoading: boolean;
   error: string | null;
 }
-
-const pillars = [
-  { icon: Code2, label: 'Search Engine Clarity', desc: 'How clearly search engines read your site' },
-  { icon: FileJson, label: 'Rich Search Presence', desc: 'Stand out with rich results in Google' },
-  { icon: BookOpen, label: 'AI Answer Readiness', desc: 'Get cited by ChatGPT & AI assistants' },
-  { icon: Paintbrush, label: 'Visual Consistency', desc: 'Clean, maintainable styling' },
-  { icon: Shield, label: 'Page Speed & Load Time', desc: 'How fast your pages load' },
-  { icon: Accessibility, label: 'Inclusive Reach', desc: 'Accessible to every visitor' },
-  { icon: Layers, label: 'AI Retrieval Readiness', desc: 'Ready for AI-powered search' },
-  { icon: Radio, label: 'AI Agent Compatibility', desc: 'Works with AI agents & tools' },
-  { icon: ShieldCheck, label: 'Tracking & Analytics Accuracy', desc: 'Reliable data you can trust' },
-  { icon: Link2, label: 'Content Architecture', desc: 'How well your pages connect' },
-];
 
 export const AuditForm: React.FC<AuditFormProps> = ({
   onRunAudit,
@@ -131,20 +108,22 @@ export const AuditForm: React.FC<AuditFormProps> = ({
           <div className="inline-flex items-center gap-2 bg-surface-raised border border-border rounded-full px-4 py-1.5 mb-8">
             <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
             <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-              Free website intelligence report
+              Three audiences · One audit engine
             </span>
           </div>
 
-          <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-text leading-[1.05] mb-6 font-heading">
-            See what your website
+          <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-text leading-[1.05] mb-6 font-heading">
+            The only website audit built for
             <br />
-            is <span className="text-accent">costing you</span>
+            humans, search engines,
+            <br />
+            <span className="text-accent">AND</span> AI systems
           </h1>
 
-          <p className="text-lg md:text-xl text-text-secondary max-w-2xl mx-auto mb-12 leading-relaxed">
-            Get a free, instant analysis across 10 critical performance
-            dimensions — from search visibility and page speed to accessibility
-            and AI readiness.
+          <p className="text-lg md:text-xl text-text-secondary max-w-3xl mx-auto mb-12 leading-relaxed">
+            10 deterministic pillars. Zero AI guessing. Every finding backed by
+            a verified statistic and a reproducible check — so every fix you
+            ship has a measurable before/after.
           </p>
         </motion.div>
 
@@ -372,38 +351,6 @@ export const AuditForm: React.FC<AuditFormProps> = ({
         </motion.div>
       </div>
 
-      {/* Pillar Cards */}
-      <div className="max-w-5xl mx-auto px-6 pb-24">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.4 }}
-          className="grid grid-cols-2 md:grid-cols-5 gap-3"
-        >
-          {pillars.map((p, i) => (
-            <motion.div
-              key={p.label}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.5 + i * 0.06 }}
-              className="group bg-surface-raised border border-border hover:border-accent/20 rounded-xl p-4 text-center transition-all"
-            >
-              <div className="w-10 h-10 mx-auto mb-3 rounded-lg bg-surface-overlay group-hover:bg-accent/10 flex items-center justify-center transition-all">
-                <p.icon
-                  size={18}
-                  className="text-text-muted group-hover:text-accent transition-colors"
-                />
-              </div>
-              <div className="text-sm font-semibold text-text mb-0.5">
-                {p.label}
-              </div>
-              <div className="text-[11px] text-text-muted leading-tight">
-                {p.desc}
-              </div>
-            </motion.div>
-          ))}
-        </motion.div>
-      </div>
     </div>
   );
 };
