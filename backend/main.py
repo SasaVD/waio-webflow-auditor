@@ -2510,7 +2510,7 @@ async def run_content_optimizer(audit_id: str, body: dict = Body(...)):
     if not target_text:
         try:
             from content_optimizer.content_extractor import extract_content_from_urls
-            extractions = await extract_content_from_urls([target_url])
+            extractions = await extract_content_from_urls([target_url], min_words=30)
             if extractions and extractions[0]["success"]:
                 target_text = extractions[0]["text"]
         except Exception as e:

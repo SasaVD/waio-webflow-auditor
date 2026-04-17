@@ -100,16 +100,23 @@ async def _playwright_fetch(url: str, timeout: float) -> str | None:
 async def extract_content_from_urls(
     urls: list[str],
     timeout: float = 15.0,
+    min_words: int | None = None,
 ) -> list[dict]:
     """Fetch and extract main content from multiple URLs concurrently.
 
     Returns list of {url, text, word_count, success, error}.
+
+    Args:
+        min_words: Minimum words for a successful extraction.
+            Defaults to _MIN_WORDS_AFTER_FILTER (300) for competitor pages.
+            Pass a lower value (e.g. 30) for target page extraction.
 
     Extraction strategy per URL (three attempts):
     1. httpx with Chrome UA → Trafilatura
     2. httpx with Firefox UA → Trafilatura  (if attempt 1 yields <200 words)
     3. Playwright headless Chromium → Trafilatura  (if still <200 words)
     """
+    effective_min = min_words if min_words is not None else _MIN_WORDS_AFTER_FILTER
     http_sem = asyncio.Semaphore(5)  # max 5 concurrent httpx fetches
     pw_sem = asyncio.Semaphore(3)  # max 3 concurrent Playwright instances
 
@@ -175,13 +182,13 @@ async def extract_content_from_urls(
             }
 
         word_count = len(best_text.split())
-        if word_count < _MIN_WORDS_AFTER_FILTER:
+        if word_count < effective_min:
             return {
                 "url": url,
                 "text": "",
                 "word_count": 0,
                 "success": False,
-                "error": f"Content too short after extraction ({word_count} words, need {_MIN_WORDS_AFTER_FILTER})",
+                "error": f"Content too short after extraction ({word_count} words, need {effective_min})",
             }
 
         return {
