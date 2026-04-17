@@ -69,6 +69,15 @@ interface AnalysisPage {
 
 /* ─── Helpers ─── */
 
+const isHomepage = (url: string): boolean => {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, '');
+    return !path || path === '/home' || path === '/index' || path === '/index.html';
+  } catch {
+    return false;
+  }
+};
+
 const gapColor = (score: number): string => {
   if (score > 50) return 'text-red-400';
   if (score > 20) return 'text-yellow-400';
@@ -389,6 +398,19 @@ export default function DashboardContentOptimizerPage() {
             </div>
           </div>
 
+          {/* Homepage warning */}
+          {isHomepage(result.target_url) && (
+            <div className="flex items-start gap-3 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+              <AlertTriangle size={16} className="text-yellow-400 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-yellow-200/80 leading-relaxed">
+                <span className="font-semibold text-yellow-300">Homepage analysis caveat:</span>{' '}
+                This analysis is most accurate for service pages, blog posts, and landing pages
+                optimized for specific keywords. Homepage analyses typically show inflated gap scores
+                because homepages aren&rsquo;t designed to rank for single keywords.
+              </p>
+            </div>
+          )}
+
           {/* Chart */}
           <motion.div
             initial={{ opacity: 0, y: 12 }}
@@ -400,7 +422,7 @@ export default function DashboardContentOptimizerPage() {
               WDF*IDF Distribution
             </h2>
             <p className="text-xs text-text-muted mb-4">
-              &ldquo;{result.keyword}&rdquo; &mdash; your page (white line) vs competitors (red=max, yellow=avg)
+              &ldquo;{result.keyword}&rdquo; &mdash; your page (dark line) vs competitors (red=max, yellow=avg)
             </p>
             <WdfIdfChart data={result.chart_data} />
             <div className="mt-3 p-3 bg-surface-overlay rounded-lg">
@@ -638,6 +660,15 @@ export default function DashboardContentOptimizerPage() {
                       {runError}
                     </div>
                   )}
+
+                  {/* Page selection guidance */}
+                  <div className="p-3 bg-cyan-500/10 border border-cyan-500/15 rounded-lg flex items-start gap-2">
+                    <Info size={14} className="text-cyan-400 mt-0.5 flex-shrink-0" />
+                    <p className="text-[10px] text-cyan-300/80 leading-relaxed">
+                      For best results, analyze service pages, blog posts, or landing pages.
+                      Homepages and generic pages typically produce misleading gap scores.
+                    </p>
+                  </div>
 
                   {/* Cost note */}
                   <div className="p-3 bg-surface-overlay rounded-lg flex items-start gap-2">

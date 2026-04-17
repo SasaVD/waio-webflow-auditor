@@ -124,13 +124,14 @@ export function WdfIdfChart({ data }: WdfIdfChartProps) {
           strokeWidth={1}
           name="Competitor Average"
         />
+        {/* Render last so line draws on top of the Area layers */}
         <Line
           type="monotone"
           dataKey="target"
-          stroke="#f1f5f9"
-          strokeWidth={2}
-          dot={{ r: 2.5, fill: '#f1f5f9', stroke: '#f1f5f9' }}
-          activeDot={{ r: 4, fill: '#2820FF' }}
+          stroke="#1f2937"
+          strokeWidth={3}
+          dot={{ r: 4, fill: '#1f2937', stroke: '#0f172a', strokeWidth: 1.5 }}
+          activeDot={{ r: 6, fill: '#2820FF', stroke: '#fff', strokeWidth: 2 }}
           name="Your Page"
         />
       </ComposedChart>

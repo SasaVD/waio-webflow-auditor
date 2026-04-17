@@ -6,6 +6,30 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Patterns found in bot-protection / security challenge pages (Cloudflare, etc.)
+# Check against the first 500 characters of extracted text.
+_BOT_PROTECTION_PATTERNS = [
+    "verify you are human",
+    "verifies you are a human",
+    "checking your browser",
+    "cloudflare",
+    "security service to protect",
+    "just a moment",
+    "please wait while we verify",
+    "enable javascript and cookies",
+]
+
+_MIN_WORDS_AFTER_FILTER = 300
+
+
+def _is_bot_protection_page(text: str) -> str | None:
+    """Return the matched pattern if text looks like a bot-protection page, else None."""
+    snippet = text[:500].lower()
+    for pattern in _BOT_PROTECTION_PATTERNS:
+        if pattern in snippet:
+            return pattern
+    return None
+
 _USER_AGENTS = [
     # Chrome 125 on macOS
     (
@@ -135,7 +159,31 @@ async def extract_content_from_urls(
                 "error": "Insufficient content extracted after all attempts",
             }
 
+        # Bot-protection / security challenge filter
+        matched_pattern = _is_bot_protection_page(best_text)
+        if matched_pattern:
+            logger.info(
+                f"Bot-protection page filtered: {url} "
+                f"(matched: '{matched_pattern}')"
+            )
+            return {
+                "url": url,
+                "text": "",
+                "word_count": 0,
+                "success": False,
+                "error": f"Bot-protection page detected ('{matched_pattern}')",
+            }
+
         word_count = len(best_text.split())
+        if word_count < _MIN_WORDS_AFTER_FILTER:
+            return {
+                "url": url,
+                "text": "",
+                "word_count": 0,
+                "success": False,
+                "error": f"Content too short after extraction ({word_count} words, need {_MIN_WORDS_AFTER_FILTER})",
+            }
+
         return {
             "url": url,
             "text": best_text,
