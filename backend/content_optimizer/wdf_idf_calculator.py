@@ -5,6 +5,7 @@ from collections import Counter
 from typing import Tuple
 
 from .schema import TermAnalysis
+from .ai_filler_corpus import is_ai_filler
 
 
 def tokenize(text: str) -> list[str]:
@@ -40,13 +41,19 @@ def run_wdf_idf_analysis(
     competitor_texts: list[str],
     max_terms: int = 100,
     ngram_range: Tuple[int, int] = (1, 3),
+    target_keyword: str = "",
 ) -> list[TermAnalysis]:
     """Compute WDF*IDF for all terms across target + competitor corpus.
 
     Returns top ``max_terms`` sorted by competitor average WDF*IDF descending.
+    Keyword-matching terms are always included regardless of ranking.
+    Uses smoothed IDF (N+1) so ubiquitous terms keep a non-zero score.
     """
     all_texts = [target_text] + competitor_texts
     num_docs = len(all_texts)
+
+    # Precompute keyword tokens for protecting keyword-matching terms
+    keyword_tokens = set(target_keyword.lower().split()) if target_keyword else set()
 
     # Tokenize all documents
     all_tokenized = [tokenize(text) for text in all_texts]
@@ -71,12 +78,18 @@ def run_wdf_idf_analysis(
     results: list[TermAnalysis] = []
     for term in all_terms:
         docs_with_term = sum(1 for counter in all_term_freqs if term in counter)
+        term_tokens = set(term.split())
+        overlaps_keyword = bool(keyword_tokens and term_tokens & keyword_tokens)
 
-        # Skip terms in only 1 doc (noise) or ALL docs (too common)
-        if docs_with_term < 2 or docs_with_term == num_docs:
-            continue
+        # Skip terms in only 1 doc (noise) — unless they match the keyword
+        # or are filler terms on the target page (needed for REMOVE recs)
+        if docs_with_term < 2 and not overlaps_keyword:
+            in_target = term in all_term_freqs[0]
+            if not (in_target and is_ai_filler(term)):
+                continue
 
-        idf = compute_idf(num_docs, docs_with_term)
+        # Smoothed IDF: log2((N+1) / docs) — never zero for ubiquitous terms
+        idf = compute_idf(num_docs + 1, docs_with_term)
 
         # Target page
         target_freq = all_term_freqs[0].get(term, 0)
@@ -124,7 +137,25 @@ def run_wdf_idf_analysis(
 
     # Sort by competitor average WDF*IDF descending
     results.sort(key=lambda t: t.competitor_avg_wdf_idf, reverse=True)
-    return results[:max_terms]
+
+    # Ensure keyword-matching terms and target-only filler terms are always
+    # included even if they fall outside the top N by WDF*IDF score
+    top = results[:max_terms]
+    included = {t.term for t in top}
+    extras = []
+    for t in results[max_terms:]:
+        if t.term in included:
+            continue
+        # Keyword-matching terms
+        if keyword_tokens and set(t.term.split()) & keyword_tokens:
+            extras.append(t)
+            continue
+        # Filler terms present on the target page (for REMOVE recommendations)
+        if t.term in all_term_freqs[0] and is_ai_filler(t.term):
+            extras.append(t)
+    top.extend(extras)
+
+    return top
 
 
 def _get_stop_words() -> set[str]:

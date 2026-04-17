@@ -78,24 +78,40 @@ for _word in FILLER_NOUNS:
 
 
 def is_ai_filler(term: str) -> bool:
-    """Check if a term is an AI filler word or phrase."""
+    """Check if a term is an AI filler word or phrase.
+
+    Handles the fact that the WDF*IDF tokenizer strips hyphens, so
+    "game-changing" arrives here as "game changing".  We re-hyphenate
+    and check both forms.
+    """
     term_lower = term.lower().strip()
 
-    # Check single-word fillers
+    # Direct single-word match
     if term_lower in ALL_SINGLE_WORD_FILLERS:
         return True
 
-    # Check multi-word: does the term match or contain a formulaic phrase?
+    # Re-hyphenated form (tokenizer converts "game-changing" → "game changing")
+    if " " in term_lower:
+        hyphenated = term_lower.replace(" ", "-")
+        if hyphenated in ALL_SINGLE_WORD_FILLERS:
+            return True
+
+    # Formulaic phrase match
     for phrase in FORMULAIC_PHRASES:
         if phrase in term_lower or term_lower in phrase:
             return True
 
-    # Check if a multi-word term has a filler head noun or inflated modifier
+    # Multi-word structural checks
     words = term_lower.split()
     if len(words) >= 2:
+        # Trailing filler noun: "digital landscape", "innovation tapestry"
         if words[-1] in FILLER_NOUNS:
             return True
+        # Leading inflated adjective: "robust solution", "bespoke design"
         if words[0] in INFLATED_ADJECTIVES:
+            return True
+        # Leading abstract verb: "leverage brand", "harness technology"
+        if words[0] in ABSTRACT_VERBS:
             return True
 
     return False
@@ -106,6 +122,11 @@ def get_filler_category(term: str) -> str:
     term_lower = term.lower().strip()
     if term_lower in _CATEGORY_MAP:
         return _CATEGORY_MAP[term_lower]
+    # Re-hyphenated form
+    if " " in term_lower:
+        hyphenated = term_lower.replace(" ", "-")
+        if hyphenated in _CATEGORY_MAP:
+            return _CATEGORY_MAP[hyphenated]
     for phrase in FORMULAIC_PHRASES:
         if phrase in term_lower or term_lower in phrase:
             return "formulaic_phrase"
@@ -115,4 +136,6 @@ def get_filler_category(term: str) -> str:
             return "filler_noun"
         if words[0] in INFLATED_ADJECTIVES:
             return "inflated_adjective"
+        if words[0] in ABSTRACT_VERBS:
+            return "abstract_verb"
     return "generic_filler"

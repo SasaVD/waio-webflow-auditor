@@ -31,7 +31,7 @@ def generate_recommendations(terms: list[TermAnalysis]) -> list[Recommendation]:
             continue
 
         # ADD: missing from target, competitors use it
-        if term.target_frequency == 0 and term.docs_containing >= 3:
+        if term.target_frequency == 0 and term.docs_containing >= 2:
             if term.classification in (TermClassification.CORE, TermClassification.SEMANTIC):
                 avg_freq = term.competitor_avg_frequency
                 recommendations.append(Recommendation(

@@ -29,12 +29,21 @@ def classify_terms(
             term.filler_category = get_filler_category(term_lower)
             continue
 
-        # Check 2: CORE -- term shares words with keyword
-        if term_tokens & keyword_tokens:
+        # Check 2: CORE -- substantial keyword overlap (≥2 tokens or single-word keyword)
+        overlap = term_tokens & keyword_tokens
+        if len(overlap) >= 2:
             term.classification = TermClassification.CORE
             continue
-        if term_lower in target_keyword.lower() or target_keyword.lower() in term_lower:
+        if len(keyword_tokens) == 1 and overlap:
             term.classification = TermClassification.CORE
+            continue
+        if target_keyword.lower() in term_lower:
+            term.classification = TermClassification.CORE
+            continue
+
+        # Partial keyword overlap (1 token) → SEMANTIC, not CORE
+        if overlap:
+            term.classification = TermClassification.SEMANTIC
             continue
 
         # Check 3: SEMANTIC -- NLP entity, bigram overlap, or high corpus signal
@@ -45,7 +54,7 @@ def classify_terms(
         if term_bigrams and keyword_bigrams and term_bigrams & keyword_bigrams:
             term.classification = TermClassification.SEMANTIC
             continue
-        if term.idf > 1.0 and term.docs_containing >= 4 and term.competitor_avg_frequency >= 3:
+        if term.idf > 0.5 and term.docs_containing >= 4 and term.competitor_avg_frequency >= 3:
             term.classification = TermClassification.SEMANTIC
             continue
 

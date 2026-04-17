@@ -39,17 +39,19 @@ async def run_content_optimization(
     key = analysis_key(target_url, keyword)
 
     try:
-        # Step 1: Fetch SERP competitors
-        serp_results = await fetch_serp_results(keyword, num_results=num_competitors)
+        # Step 1: Fetch 2x SERP results to account for extraction failures
+        fetch_count = num_competitors * 2
+        serp_results = await fetch_serp_results(keyword, num_results=fetch_count)
         competitor_urls = [
             r["url"] for r in serp_results if r["url"] != target_url
-        ][:num_competitors]
+        ]
 
-        # Step 2: Extract content from competitors
+        # Step 2: Extract content from all fetched URLs
         competitor_extractions = await extract_content_from_urls(competitor_urls)
         successful = [e for e in competitor_extractions if e["success"]]
         failed_count = len(competitor_extractions) - len(successful)
-        competitor_texts = [e["text"] for e in successful]
+        # Take the top N successful extractions (highest SERP position first)
+        competitor_texts = [e["text"] for e in successful[:num_competitors]]
 
         if len(competitor_texts) < 3:
             raise ValueError(
@@ -63,6 +65,7 @@ async def run_content_optimization(
             competitor_texts=competitor_texts,
             max_terms=100,
             ngram_range=(1, 3),
+            target_keyword=keyword,
         )
 
         # Step 4: Classify terms
@@ -71,10 +74,10 @@ async def run_content_optimization(
         # Step 5: Generate recommendations
         recommendations = generate_recommendations(terms)
 
-        # Step 6: Prepare chart data (top 60 terms)
+        # Step 6: Prepare chart data (top 35 terms for readability)
         chart_terms = sorted(
             terms, key=lambda t: t.competitor_avg_wdf_idf, reverse=True
-        )[:60]
+        )[:35]
         chart_data = [
             {
                 "term": t.term,
