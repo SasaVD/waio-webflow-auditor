@@ -47,6 +47,9 @@ const DashboardLinkIntelligencePage = lazy(
 const DashboardAIVisibilityPage = lazy(
   () => import('./pages/DashboardAIVisibilityPage')
 );
+const DashboardContentOptimizerPage = lazy(
+  () => import('./pages/DashboardContentOptimizerPage')
+);
 const AdminPanel = lazy(
   () => import('./components/auth/AdminPanel')
 );
@@ -193,6 +196,14 @@ export const router = createBrowserRouter([
         element: (
           <Suspense fallback={dashboardFallback}>
             <DashboardAIVisibilityPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'content-optimizer',
+        element: (
+          <Suspense fallback={dashboardFallback}>
+            <DashboardContentOptimizerPage />
           </Suspense>
         ),
       },

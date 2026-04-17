@@ -68,6 +68,7 @@ const navGroups: NavGroup[] = [
       { icon: Layers, label: PILLAR_LABELS.rag_readiness, href: 'pillar/ai-retrieval-readiness' },
       { icon: Brain, label: 'Content Intelligence', href: 'content-intelligence' },
       { icon: Eye, label: 'AI Visibility', href: 'ai-visibility' },
+      { icon: BarChart3, label: 'Content Optimizer', href: 'content-optimizer' },
     ],
   },
   {

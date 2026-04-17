@@ -33,6 +33,7 @@ import { PillarRadarChart } from '../components/dashboard/PillarRadarChart';
 import { ExportButton } from '../components/export/ExportButton';
 import { PILLAR_LABELS, PILLAR_SHORT_LABELS } from '../constants/pillarLabels';
 import { AIVisibilityKpiCard } from '../components/ai-visibility/AIVisibilityKpiCard';
+import { ContentOptimizerKpiCard } from '../components/content-optimizer/ContentOptimizerKpiCard';
 
 /* ─── Helpers ─── */
 const scoreColor = (score: number): string => {
@@ -472,6 +473,11 @@ export default function DashboardOverviewPage() {
       {/* AI Visibility Card */}
       {report?.audit_id && (
         <AIVisibilityKpiCard auditId={report.audit_id} />
+      )}
+
+      {/* Content Optimizer Card */}
+      {report?.audit_id && (
+        <ContentOptimizerKpiCard auditId={report.audit_id} />
       )}
 
       {/* Content Intelligence Card */}

@@ -2474,6 +2474,166 @@ async def get_ai_visibility(audit_id: str):
     return {"status": status, **viz}
 
 
+# --- Content Optimizer Endpoints ---
+
+@app.post("/api/audit/{audit_id}/content-optimizer/run", status_code=202)
+async def run_content_optimizer(audit_id: str, body: dict = Body(...)):
+    """Kick off WDF*IDF content optimization as a background task.
+
+    Body: {"url": "https://...", "keyword": "target keyword"}
+    """
+    audit = await get_audit_by_id(audit_id)
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+
+    target_url = (body.get("url") or "").strip()
+    keyword = (body.get("keyword") or "").strip()
+    if not target_url or not keyword:
+        raise HTTPException(status_code=400, detail="Both 'url' and 'keyword' are required")
+
+    # Check SerpApi key
+    if not os.environ.get("SERPAPI_KEY"):
+        raise HTTPException(status_code=503, detail="SERPAPI_KEY not configured")
+
+    # Try to get target text from existing crawl data
+    report = audit.get("report_json") or {}
+    target_text = ""
+
+    # Check page_content DB
+    pages = await get_page_content_for_audit(audit_id)
+    for p in (pages or []):
+        if p.get("url") == target_url and p.get("clean_text"):
+            target_text = p["clean_text"]
+            break
+
+    # If not in DB, extract live via Trafilatura
+    if not target_text:
+        try:
+            from content_optimizer.content_extractor import extract_content_from_urls
+            extractions = await extract_content_from_urls([target_url])
+            if extractions and extractions[0]["success"]:
+                target_text = extractions[0]["text"]
+        except Exception as e:
+            logger.warning(f"Content optimizer: failed to extract target URL: {e}")
+
+    if not target_text or len(target_text.split()) < 30:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not extract enough content from the target URL (minimum 30 words)",
+        )
+
+    # Get NLP entities for better term classification
+    top_entities = None
+    nlp_data = report.get("nlp_analysis") or {}
+    entities = nlp_data.get("entities") or []
+    if entities:
+        top_entities = [e["name"] for e in entities[:20] if isinstance(e, dict) and e.get("name")]
+
+    # Write running state
+    from datetime import datetime, timezone
+    from content_optimizer import analysis_key
+    key = analysis_key(target_url, keyword)
+    co = report.get("content_optimizer") or {}
+    analyses = co.get("analyses") or {}
+
+    # Prevent concurrent runs for same URL+keyword
+    existing = analyses.get(key) or {}
+    if existing.get("status") == "running":
+        raise HTTPException(status_code=409, detail="Analysis already running for this URL+keyword")
+
+    analyses[key] = {
+        "url": target_url,
+        "keyword": keyword,
+        "analyzed_at": datetime.now(timezone.utc).isoformat(),
+        "status": "running",
+    }
+    await update_audit_report(audit_id, {"content_optimizer": {"analyses": analyses}})
+
+    # Fire background task
+    from content_optimizer import run_content_optimization
+    asyncio.create_task(
+        run_content_optimization(
+            audit_id=audit_id,
+            target_url=target_url,
+            target_text=target_text,
+            keyword=keyword,
+            top_entities=top_entities,
+        )
+    )
+
+    return {"status": "running", "key": key}
+
+
+@app.get("/api/audit/{audit_id}/content-optimizer")
+async def get_content_optimizer_result(audit_id: str, url: str = "", keyword: str = ""):
+    """Get content optimizer results for a specific URL+keyword, or a specific key."""
+    audit = await get_audit_by_id(audit_id)
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+
+    report = audit.get("report_json") or {}
+    co = report.get("content_optimizer") or {}
+    analyses = co.get("analyses") or {}
+
+    if not analyses:
+        return {"status": "not_computed"}
+
+    # If url+keyword provided, find by key
+    if url and keyword:
+        from content_optimizer import analysis_key
+        key = analysis_key(url.strip(), keyword.strip())
+        entry = analyses.get(key)
+        if not entry:
+            return {"status": "not_computed"}
+        return entry
+
+    # If only url provided, return most recent analysis for that URL
+    if url:
+        url_analyses = [
+            v for v in analyses.values()
+            if isinstance(v, dict) and v.get("url") == url.strip()
+        ]
+        if not url_analyses:
+            return {"status": "not_computed"}
+        latest = max(url_analyses, key=lambda a: a.get("analyzed_at", ""))
+        return latest
+
+    # No filter — return most recent analysis
+    all_entries = [v for v in analyses.values() if isinstance(v, dict)]
+    if not all_entries:
+        return {"status": "not_computed"}
+    latest = max(all_entries, key=lambda a: a.get("analyzed_at", ""))
+    return latest
+
+
+@app.get("/api/audit/{audit_id}/content-optimizer/pages")
+async def list_content_optimizer_pages(audit_id: str):
+    """List all pages that have been analyzed with Content Optimizer."""
+    audit = await get_audit_by_id(audit_id)
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+
+    report = audit.get("report_json") or {}
+    co = report.get("content_optimizer") or {}
+    analyses = co.get("analyses") or {}
+
+    pages = []
+    for key, entry in analyses.items():
+        if not isinstance(entry, dict):
+            continue
+        result = entry.get("result") or {}
+        pages.append({
+            "key": key,
+            "url": entry.get("url", ""),
+            "keyword": entry.get("keyword", ""),
+            "status": entry.get("status", "unknown"),
+            "analyzed_at": entry.get("analyzed_at"),
+            "content_gap_score": result.get("summary", {}).get("content_gap_score"),
+        })
+
+    return {"pages": pages}
+
+
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
