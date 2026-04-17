@@ -128,6 +128,38 @@ def _get_ai_visibility(report: dict) -> dict | None:
     return aiv
 
 
+def _get_content_optimizer_summary(report: dict) -> dict | None:
+    """Aggregate Content Optimizer analyses into a summary, or None if not run."""
+    co_data = (report.get("content_optimizer") or {}).get("analyses") or {}
+    if not co_data:
+        return None
+
+    analyses = [a for a in co_data.values() if isinstance(a, dict) and a.get("status") == "ok"]
+    if not analyses:
+        return None
+
+    results = [a["result"] for a in analyses if isinstance(a.get("result"), dict)]
+    if not results:
+        return None
+
+    total_pages = len(results)
+    avg_gap = sum(r.get("summary", {}).get("content_gap_score", 0) for r in results) / total_pages
+    total_filler = sum(r.get("summary", {}).get("filler_count", 0) for r in results)
+    total_missing_core = sum(
+        r.get("summary", {}).get("recommendations_count", {}).get("add", 0)
+        for r in results
+    )
+    keywords = [r.get("keyword", "") for r in results if r.get("keyword")]
+
+    return {
+        "pages_analyzed": total_pages,
+        "avg_content_gap": round(avg_gap, 1),
+        "total_filler_terms": total_filler,
+        "total_missing_core_terms": total_missing_core,
+        "keywords_analyzed": keywords,
+    }
+
+
 def _composite_category_scores(scores: Dict[str, int]) -> Dict[str, int]:
     """Return the composite (averaged) score per scorecard category.
 
@@ -696,6 +728,31 @@ def _section_strategic_context(report: dict, scores: Dict[str, int]) -> str:
             f"compound into meaningful aggregate lift."
         )
 
+    # Content Optimizer context (if analyses exist)
+    co_summary = _get_content_optimizer_summary(report)
+    if co_summary:
+        pages = co_summary["pages_analyzed"]
+        gap = co_summary["avg_content_gap"]
+        pages_frag = f"{pages} key page{'s' if pages != 1 else ''}"
+        if gap > 60:
+            lines.append(
+                f"Content analysis across {pages_frag} reveals an average content "
+                f"gap of {gap}% compared to top-ranking competitors — the content "
+                f"is significantly less comprehensive than pages currently ranking "
+                f"for the same queries."
+            )
+        elif gap >= 30:
+            lines.append(
+                f"Content analysis across {pages_frag} shows a {gap}% gap versus "
+                f"top-ranking competitors, indicating room for content depth "
+                f"improvements."
+            )
+        else:
+            lines.append(
+                f"Content depth analysis across {pages_frag} shows pages are "
+                f"competitive with top-ranking content for their target queries."
+            )
+
     # AI Visibility context (Phase 3)
     aiv = _get_ai_visibility(report)
     if aiv:
@@ -1090,6 +1147,26 @@ def _section_diagnosis(report: dict, scores: Dict[str, int]) -> str:
                 f"authority."
             )
 
+    # Content Optimizer diagnostics
+    co_summary = _get_content_optimizer_summary(report)
+    if co_summary:
+        missing_core = co_summary["total_missing_core_terms"]
+        filler = co_summary["total_filler_terms"]
+        pages = co_summary["pages_analyzed"]
+        if missing_core > 10:
+            statements.append(
+                f"Analyzed pages are missing {missing_core} core topical terms "
+                f"that top-ranking competitors consistently use. These gaps "
+                f"directly limit topical authority for target queries."
+            )
+        if filler > 15:
+            statements.append(
+                f"Content contains {filler} instances of AI-generic filler "
+                f"phrases (like \"cutting-edge,\" \"leverage,\" \"robust\") "
+                f"across {pages} analyzed pages that weaken SEO signal clarity "
+                f"without adding substantive value."
+            )
+
     # AI engine coverage diagnostic (Phase 3)
     aiv = _get_ai_visibility(report)
     if aiv:
@@ -1201,6 +1278,18 @@ def _section_key_risks(report: dict, scores: Dict[str, int]) -> str:
                 f"Competitors capturing demand for topics where this site has "
                 f"no content presence ({total_gaps} such gaps identified)"
             )
+
+    # Content depth risk (from Content Optimizer)
+    co_summary = _get_content_optimizer_summary(report)
+    if co_summary and co_summary["avg_content_gap"] > 70:
+        risks.append(
+            f"Content depth is substantially below top-ranking competitors for "
+            f"target queries (avg gap {co_summary['avg_content_gap']}% across "
+            f"{co_summary['pages_analyzed']} analyzed page"
+            f"{'s' if co_summary['pages_analyzed'] != 1 else ''}). Without "
+            f"content expansion, pages will struggle to compete for commercially "
+            f"relevant search results"
+        )
 
     if not risks:
         return ""  # Skip section entirely for high-scoring sites
@@ -1402,6 +1491,19 @@ def _section_priority_actions(
                     f"Create content for the {total_gaps} identified topic "
                     f"gaps{sample_frag} to establish authority in uncovered areas"
                 )
+
+    # Content Optimizer action
+    co_summary = _get_content_optimizer_summary(report)
+    if co_summary and co_summary["total_missing_core_terms"] > 0:
+        missing = co_summary["total_missing_core_terms"]
+        pages = co_summary["pages_analyzed"]
+        actions.append(
+            f"Address the content gaps identified in the Content Optimizer "
+            f"analysis — specifically the {missing} missing core term"
+            f"{'s' if missing != 1 else ''} across {pages} analyzed page"
+            f"{'s' if pages != 1 else ''}. Each addition strengthens topical "
+            f"authority for target keywords."
+        )
 
     if not actions:
         return (
