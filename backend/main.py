@@ -27,6 +27,7 @@ from executive_summary_generator import generate_executive_summary
 from webflow_fixes import get_fix, get_all_fixes, match_fixes_to_findings
 from generic_fixes import match_generic_fixes_to_findings
 from pdf_generator import generate_pdf
+from pdf_export_generator import generate_branded_pdf
 from md_generator import generate_markdown
 from email_sender import send_report_email
 from db_router import (init_db, close_db, create_job, get_job_status, get_single_page_audit,
@@ -2235,6 +2236,35 @@ async def export_pdf(request: ExportRequest):
         )
     except Exception as e:
         logger.error(f"PDF export failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
+
+
+@app.get("/api/audit/{audit_id}/export/pdf")
+async def export_branded_pdf(audit_id: str):
+    """Generate a branded premium 10-section PDF for an audit, fetched by ID."""
+    try:
+        record = await get_audit_by_id(audit_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Audit not found")
+        report = record["report_json"] or {}
+        if isinstance(report, str):
+            report = json.loads(report)
+        report["audit_id"] = str(record.get("id") or audit_id)
+
+        pdf_bytes = generate_branded_pdf(report)
+
+        url = report.get("url") or "report"
+        safe_url = url.replace("https://", "").replace("http://", "").replace("/", "_").strip("_")
+        filename = f"WAIO-Intelligence-Report-{safe_url}.pdf"
+        return Response(
+            content=bytes(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Branded PDF export failed for {audit_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
 
 @app.post("/api/export/md")

@@ -10,6 +10,8 @@ axe-playwright-python
 cssutils
 nltk
 fpdf2
+weasyprint
+jinja2
 resend
 aiosqlite
 asyncpg

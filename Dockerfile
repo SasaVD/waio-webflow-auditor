@@ -16,10 +16,16 @@ ENV PYTHONUNBUFFERED=1
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Install essential system tools
+# WeasyPrint 60+ requires Pango (no longer Cairo/GObject) for PDF rendering
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz0b \
+    libfontconfig1 \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

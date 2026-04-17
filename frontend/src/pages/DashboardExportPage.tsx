@@ -10,6 +10,7 @@ import {
   Loader2,
   CheckCircle2,
   Network,
+  Crown,
 } from 'lucide-react';
 import { useAuditStore } from '../stores/auditStore';
 import { generateExcel } from '../utils/generateExcel';
@@ -26,6 +27,8 @@ export default function DashboardExportPage() {
   const [linkXlsxDone, setLinkXlsxDone] = useState(false);
   const [linkCsvLoading, setLinkCsvLoading] = useState(false);
   const [linkCsvDone, setLinkCsvDone] = useState(false);
+  const [brandedPdfLoading, setBrandedPdfLoading] = useState(false);
+  const [brandedPdfDone, setBrandedPdfDone] = useState(false);
   const apiBase = import.meta.env.PROD ? '' : 'http://127.0.0.1:8000';
 
   const domain = report?.url
@@ -59,6 +62,30 @@ export default function DashboardExportPage() {
       console.error('PDF export failed:', err);
     } finally {
       setPdfLoading(false);
+    }
+  };
+
+  const handleBrandedPdf = async () => {
+    if (!auditId) return;
+    setBrandedPdfLoading(true);
+    setBrandedPdfDone(false);
+    try {
+      const res = await fetch(`${apiBase}/api/audit/${auditId}/export/pdf`);
+      if (!res.ok) throw new Error('Branded PDF generation failed');
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `WAIO-Intelligence-Report-${domain}-${date}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+      setBrandedPdfDone(true);
+    } catch (err) {
+      console.error('Branded PDF export failed:', err);
+    } finally {
+      setBrandedPdfLoading(false);
     }
   };
 
@@ -207,6 +234,56 @@ export default function DashboardExportPage() {
           </div>
         </motion.div>
       )}
+
+      {/* Branded Intelligence Report — hero card */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.08 }}
+        className="bg-accent/5 border border-accent/30 rounded-xl p-5 flex items-center justify-between gap-4 shadow-glow-accent"
+      >
+        <div className="flex items-start gap-4">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-accent/15">
+            <Crown size={18} className="text-accent" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-semibold text-text">
+                Branded Intelligence Report (PDF)
+              </div>
+              <span className="text-[10px] font-bold tracking-wider uppercase bg-accent/20 text-accent px-2 py-0.5 rounded-full">
+                Premium
+              </span>
+            </div>
+            <div className="text-xs text-text-muted mt-1 max-w-xl leading-relaxed">
+              Premium 10-section PDF with executive summary, pillar scorecard grouped by
+              weight, link intelligence, AI visibility across 5 platforms, content optimizer
+              results, and priority actions. Designed for stakeholder delivery.
+            </div>
+            <div className="text-[10px] text-text-muted mt-1.5 font-mono">
+              WAIO-Intelligence-Report-{domain}-{date}.pdf
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={handleBrandedPdf}
+          disabled={!auditId || brandedPdfLoading}
+          className="flex items-center gap-2 bg-accent hover:bg-accent-hover text-white font-semibold px-4 py-2.5 rounded-xl transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+        >
+          {brandedPdfLoading ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : brandedPdfDone ? (
+            <CheckCircle2 size={14} />
+          ) : (
+            <Download size={14} />
+          )}
+          {brandedPdfLoading
+            ? 'Generating...'
+            : brandedPdfDone
+              ? 'Downloaded'
+              : 'Download Branded PDF'}
+        </button>
+      </motion.div>
 
       {/* Export Format Cards */}
       <div className="space-y-3">
