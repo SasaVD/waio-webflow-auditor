@@ -1267,19 +1267,8 @@ def _section_key_risks(report: dict, scores: Dict[str, int]) -> str:
             "on assistive technologies"
         )
 
-    # Content gaps risk
-    if clusters:
-        total_gaps = sum(
-            len(c.get("content_gaps", []))
-            for c in clusters.get("clusters", [])
-        )
-        if total_gaps >= 20:
-            risks.append(
-                f"Competitors capturing demand for topics where this site has "
-                f"no content presence ({total_gaps} such gaps identified)"
-            )
-
-    # Content depth risk (from Content Optimizer)
+    # Content depth risk (from Content Optimizer) — prioritized over cluster gaps
+    # since it's backed by real competitor content scraping, not derived counts
     co_summary = _get_content_optimizer_summary(report)
     if co_summary and co_summary["avg_content_gap"] > 70:
         risks.append(
@@ -1290,6 +1279,18 @@ def _section_key_risks(report: dict, scores: Dict[str, int]) -> str:
             f"content expansion, pages will struggle to compete for commercially "
             f"relevant search results"
         )
+
+    # Content gaps risk (from topic clusters) — broader coverage signal
+    if clusters:
+        total_gaps = sum(
+            len(c.get("content_gaps", []))
+            for c in clusters.get("clusters", [])
+        )
+        if total_gaps >= 20:
+            risks.append(
+                f"Competitors capturing demand for topics where this site has "
+                f"no content presence ({total_gaps} such gaps identified)"
+            )
 
     if not risks:
         return ""  # Skip section entirely for high-scoring sites
