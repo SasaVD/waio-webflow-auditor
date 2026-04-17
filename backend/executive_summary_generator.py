@@ -1200,7 +1200,7 @@ def _section_diagnosis(report: dict, scores: Dict[str, int]) -> str:
 
 
 def _section_key_risks(report: dict, scores: Dict[str, int]) -> str:
-    """Section 4: 3 specific risk statements tied to the diagnosis."""
+    """Section 4: up to 4 specific risk statements tied to the diagnosis."""
     tipr = _get_tipr(report)
     clusters = _get_clusters(report)
 
@@ -1295,7 +1295,7 @@ def _section_key_risks(report: dict, scores: Dict[str, int]) -> str:
         return ""  # Skip section entirely for high-scoring sites
 
     lines = ["## Key Risks\n"]
-    for risk in risks[:3]:
+    for risk in risks[:4]:
         lines.append(f"- {risk}")
 
     return "\n".join(lines)
