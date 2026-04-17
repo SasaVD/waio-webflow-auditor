@@ -1,5 +1,4 @@
 """Tests for markdown_to_html covering GFM tables (Fix 1)."""
-import importlib
 import sys
 from pathlib import Path
 

@@ -271,10 +271,10 @@ def _render_inline(text: str) -> str:
 def markdown_to_html(md: str) -> str:
     """Markdown converter for the executive summary.
 
-    Uses python-markdown with the `tables`, `fenced_code`, and `nl2br`
-    extensions when available so GFM pipe-tables render as real HTML
-    tables. Falls back to a minimal in-module converter when the library
-    is missing (keeps local dev unblocked without the extra dep).
+    Uses python-markdown with the `tables` and `fenced_code` extensions
+    when available so GFM pipe-tables render as real HTML tables. Falls
+    back to a minimal in-module converter when the library is missing
+    (keeps local dev unblocked without the extra dep).
     """
     if not md:
         return ""
