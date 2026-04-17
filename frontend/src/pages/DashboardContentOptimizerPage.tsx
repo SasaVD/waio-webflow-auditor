@@ -400,10 +400,10 @@ export default function DashboardContentOptimizerPage() {
 
           {/* Homepage warning */}
           {isHomepage(result.target_url) && (
-            <div className="flex items-start gap-3 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
-              <AlertTriangle size={16} className="text-yellow-400 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-yellow-200/80 leading-relaxed">
-                <span className="font-semibold text-yellow-300">Homepage analysis caveat:</span>{' '}
+            <div className="flex items-start gap-3 p-4 bg-amber-50 border-l-4 border-amber-400 rounded-xl">
+              <AlertTriangle size={18} className="text-amber-500 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-amber-800 leading-relaxed">
+                <span className="block font-semibold text-amber-900 mb-0.5">Homepage analysis caveat</span>
                 This analysis is most accurate for service pages, blog posts, and landing pages
                 optimized for specific keywords. Homepage analyses typically show inflated gap scores
                 because homepages aren&rsquo;t designed to rank for single keywords.
