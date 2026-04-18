@@ -1886,6 +1886,44 @@ _TEMPLATE = r"""<!DOCTYPE html>
         </tbody>
       </table>
     {% endif %}
+
+    {% if ai_visibility.status_headline %}
+      <div class="infobox" style="margin-top: 12pt;">
+        <div class="title">{{ ai_visibility.status_headline }}</div>
+        <div>{{ ai_visibility.status_body }}</div>
+      </div>
+    {% endif %}
+
+    {% if ai_visibility.discovery_brands %}
+      <h3>Brands Appearing in Your Category</h3>
+      <p class="small muted" style="margin-bottom: 8pt;">
+        Extracted from discovery-prompt responses across every tested engine.
+        Reputation prompt (your brand queried directly) is excluded so this
+        reflects answer-space competition, not self-reference.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Rank</th><th>Brand</th><th style="text-align:right;">Mentions</th></tr>
+        </thead>
+        <tbody>
+          {% for b in ai_visibility.discovery_brands %}
+            <tr>
+              <td class="muted">{{ loop.index }}</td>
+              <td><strong>{{ b.name }}</strong></td>
+              <td style="text-align:right;">{{ b.count }}×</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="small muted" style="margin-top: 8pt;">
+        Your brand <strong>{{ ai_visibility.brand }}</strong>:
+        {% if ai_visibility.total_mentions == 0 %}
+          not cited in discovery prompts. Only mentioned when directly queried.
+        {% else %}
+          cited in {{ ai_visibility.total_mentions }} discovery responses.
+        {% endif %}
+      </p>
+    {% endif %}
   {% endif %}
 </div>
 
