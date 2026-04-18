@@ -433,6 +433,7 @@ def _build_cover(report: dict) -> dict:
         "cms": cms,
         "tier": tier,
         "timestamp": ts,
+        "score_ring_svg": _render_score_ring_svg(overall_score),
     }
 
 
@@ -1254,16 +1255,15 @@ _TEMPLATE = r"""<!DOCTYPE html>
     background: rgba(255,255,255,0.04);
     border: 1px solid rgba(255,255,255,0.10);
   }
-  .score-circle {
-    width: 120pt;
-    height: 120pt;
-    border-radius: 50%;
-    background: conic-gradient({{ cover.overall_color }} 0% {{ cover.overall_score }}%, rgba(255,255,255,0.08) {{ cover.overall_score }}% 100%);
+  .score-circle-svg {
+    width: 140pt;
+    height: 140pt;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
   }
+  .score-circle-svg svg { width: 100%; height: 100%; }
   .score-inner {
     width: 94pt;
     height: 94pt;
@@ -1627,12 +1627,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     </div>
 
     <div class="cover-score-card">
-      <div class="score-circle">
-        <div class="score-inner">
-          <div class="score-num">{{ cover.overall_score }}</div>
-          <div class="score-of">/ 100</div>
-        </div>
-      </div>
+      <div class="score-circle-svg">{{ cover.score_ring_svg | safe }}</div>
       <div class="score-label-block">
         <div class="eyebrow-plain">Overall Audit Score</div>
         <div class="big">{{ cover.overall_label }}</div>
