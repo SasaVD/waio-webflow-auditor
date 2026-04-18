@@ -1066,6 +1066,25 @@ def _prepare_context(report: dict) -> dict:
 
     pillar_groups = _build_pillars(report)
     pillar_bar_svg = _render_pillar_bar_chart_svg(pillar_groups)
+    tipr = _build_tipr(report)
+    content_intel = _build_content_intel(report)
+    ai_viz = _build_ai_visibility(report)
+    content_opt = _build_content_optimizer(report)
+    clusters = _build_clusters(report)
+    priority_actions = _build_priority_actions(report)
+
+    toc_entries: list[dict] = [
+        {"id": "sec-exec", "label": "Executive Summary", "show": bool(exec_html)},
+        {"id": "sec-pillars", "label": "10-Pillar Scorecard", "show": True},
+        {"id": "sec-tipr", "label": "Link Intelligence — TIPR Analysis", "show": bool(tipr.get("available"))},
+        {"id": "sec-content-intel", "label": "Content Intelligence", "show": bool(content_intel.get("available"))},
+        {"id": "sec-ai-viz", "label": "AI Visibility Report", "show": bool(ai_viz.get("available"))},
+        {"id": "sec-optimizer", "label": "Content Optimizer Summaries", "show": bool(content_opt.get("available"))},
+        {"id": "sec-clusters", "label": "Topic Clusters", "show": bool(clusters.get("available"))},
+        {"id": "sec-priority", "label": "Priority Action Items", "show": bool(priority_actions)},
+        {"id": "sec-methodology", "label": "Methodology", "show": True},
+    ]
+    toc_entries = [t for t in toc_entries if t["show"]]
 
     ctx = {
         "cover": _build_cover(report),
@@ -1074,12 +1093,13 @@ def _prepare_context(report: dict) -> dict:
         "pillar_groups": pillar_groups,
         "pillar_bar_svg": pillar_bar_svg,
         "pillar_descriptions": PILLAR_DESCRIPTIONS,
-        "tipr": _build_tipr(report),
-        "content_intel": _build_content_intel(report),
-        "ai_visibility": _build_ai_visibility(report),
-        "content_optimizer": _build_content_optimizer(report),
-        "clusters": _build_clusters(report),
-        "priority_actions": _build_priority_actions(report),
+        "tipr": tipr,
+        "content_intel": content_intel,
+        "ai_visibility": ai_viz,
+        "content_optimizer": content_opt,
+        "clusters": clusters,
+        "priority_actions": priority_actions,
+        "toc_entries": toc_entries,
         "current_year": datetime.utcnow().year,
         "accent": ACCENT,
         "cyan": CYAN,
@@ -1660,6 +1680,36 @@ _TEMPLATE = r"""<!DOCTYPE html>
     height: 10pt;
     border-radius: 4pt;
   }
+  .toc-list { list-style: none; padding: 0; margin: 20pt 0; }
+  .toc-entry {
+    display: flex;
+    align-items: baseline;
+    margin-bottom: 10pt;
+    font-size: 11pt;
+    font-family: Inter, sans-serif;
+  }
+  .toc-title {
+    flex-shrink: 0;
+    color: #0F172A;
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .toc-dots {
+    flex-grow: 1;
+    border-bottom: 1px dotted #94A3B8;
+    margin: 0 8pt;
+    transform: translateY(-3pt);
+    min-width: 24pt;
+  }
+  .toc-page-num {
+    flex-shrink: 0;
+    color: #64748B;
+    text-decoration: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .toc-page-num::before {
+    content: target-counter(attr(href), page);
+  }
 </style>
 </head>
 <body>
@@ -1692,10 +1742,26 @@ _TEMPLATE = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- TOC -->
+<div class="page toc-page">
+  <div class="section-eyebrow">Contents</div>
+  <h2>Contents</h2>
+  <div class="section-divider"></div>
+  <ul class="toc-list">
+    {% for t in toc_entries %}
+      <li class="toc-entry">
+        <a class="toc-title" href="#{{ t.id }}">{{ t.label }}</a>
+        <span class="toc-dots"></span>
+        <a class="toc-page-num" href="#{{ t.id }}"></a>
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- 2. EXECUTIVE SUMMARY -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="page">
+<div class="page" id="sec-exec">
   <div class="section-eyebrow">Section 02</div>
   <h2>Executive Summary</h2>
   <div class="section-divider"></div>
@@ -1713,7 +1779,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- 3. 10-PILLAR SCORECARD -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="page">
+<div class="page" id="sec-pillars">
   <div class="section-eyebrow">Section 03</div>
   <h2>10-Pillar Scorecard</h2>
   <div class="section-divider"></div>
@@ -1754,7 +1820,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- 4. LINK INTELLIGENCE (TIPR) -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="page">
+<div class="page" id="sec-tipr">
   <div class="section-eyebrow">Section 04</div>
   <h2>Link Intelligence — TIPR Analysis</h2>
   <div class="section-divider"></div>
@@ -1843,7 +1909,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- 5. CONTENT INTELLIGENCE -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="page">
+<div class="page" id="sec-content-intel">
   <div class="section-eyebrow">Section 05</div>
   <h2>Content Intelligence</h2>
   <div class="section-divider"></div>
@@ -1892,7 +1958,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- 6. AI VISIBILITY -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="page">
+<div class="page" id="sec-ai-viz">
   <div class="section-eyebrow">Section 06</div>
   <h2>AI Visibility Report</h2>
   <div class="section-divider"></div>
@@ -2011,7 +2077,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- 7. CONTENT OPTIMIZER -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="page">
+<div class="page" id="sec-optimizer">
   <div class="section-eyebrow">Section 07</div>
   <h2>Content Optimizer Summaries</h2>
   <div class="section-divider"></div>
@@ -2059,7 +2125,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- 8. TOPIC CLUSTERS -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="page">
+<div class="page" id="sec-clusters">
   <div class="section-eyebrow">Section 08</div>
   <h2>Topic Clusters</h2>
   <div class="section-divider"></div>
@@ -2119,7 +2185,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- 9. PRIORITY ACTIONS -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="page">
+<div class="page" id="sec-priority">
   <div class="section-eyebrow">Section 09</div>
   <h2>Priority Action Items</h2>
   <div class="section-divider"></div>
@@ -2148,7 +2214,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- 10. METHODOLOGY -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="page">
+<div class="page" id="sec-methodology">
   <div class="section-eyebrow">Section 10</div>
   <h2>Methodology</h2>
   <div class="section-divider"></div>
