@@ -593,16 +593,21 @@ def _filter_entities(raw_entities: list[dict]) -> list[dict]:
     """Filter low-value entities and humanize types.
 
     Drops entries with salience < 0.04 and type=="OTHER" entries below 0.10.
-    If fewer than 5 survive, relaxes the threshold to 0.02 so the section
-    never feels empty.
+    Entities with no type field are treated as OTHER.
+    If fewer than 5 survive, relaxes the non-OTHER threshold to 0.02 but
+    holds the OTHER bar at 0.10 so generic noise words don't flood back in.
     """
+    def _normalize_type(e: dict) -> str:
+        raw_type = e.get("type") or e.get("entity_type") or ""
+        return (raw_type or "OTHER").upper()
+
     def _pick(threshold: float, other_threshold: float) -> list[dict]:
         out: list[dict] = []
         for e in raw_entities:
             if not isinstance(e, dict):
                 continue
             sal = float(e.get("salience") or 0)
-            etype = (e.get("type") or e.get("entity_type") or "").upper()
+            etype = _normalize_type(e)
             if sal < threshold:
                 continue
             if etype == "OTHER" and sal < other_threshold:
@@ -617,7 +622,8 @@ def _filter_entities(raw_entities: list[dict]) -> list[dict]:
 
     entities = _pick(0.04, 0.10)
     if len(entities) < 5:
-        entities = _pick(0.02, 0.05)
+        # Relax non-OTHER threshold only — OTHER stays strict
+        entities = _pick(0.02, 0.10)
     return entities
 
 
