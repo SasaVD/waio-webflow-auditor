@@ -309,6 +309,11 @@ def _translate_finding(desc: str, pillar_key: str) -> str:
             "Interactive elements (menus, tabs, dialogs) have incomplete "
             "accessibility markup, making them unusable for screen-reader users."
         )
+    if "link-name" in low or ("links must have discernible" in low):
+        return (
+            "Some links have no descriptive text, making navigation impossible "
+            "for screen-reader users and weakening internal-link SEO signals."
+        )
     if "aria-prohibited-attr" in low or "aria-prohibited" in low:
         return (
             "Some elements use ARIA attributes that are disallowed for their role, "
