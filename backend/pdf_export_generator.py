@@ -1064,11 +1064,15 @@ def _prepare_context(report: dict) -> dict:
     summary_md = report.get("executive_summary") or ""
     exec_html = markdown_to_html(summary_md) if summary_md else ""
 
+    pillar_groups = _build_pillars(report)
+    pillar_bar_svg = _render_pillar_bar_chart_svg(pillar_groups)
+
     ctx = {
         "cover": _build_cover(report),
         "exec_html": exec_html,
         "has_exec": bool(exec_html),
-        "pillar_groups": _build_pillars(report),
+        "pillar_groups": pillar_groups,
+        "pillar_bar_svg": pillar_bar_svg,
         "pillar_descriptions": PILLAR_DESCRIPTIONS,
         "tipr": _build_tipr(report),
         "content_intel": _build_content_intel(report),
@@ -1608,6 +1612,54 @@ _TEMPLATE = r"""<!DOCTYPE html>
     font-size: 9pt;
     font-weight: 600;
   }
+  .tipr-quadrant {
+    display: grid;
+    grid-template-columns: 80pt 1fr 1fr;
+    grid-template-rows: 18pt 90pt 90pt 18pt;
+    gap: 4pt;
+    margin: 10pt 0 18pt 0;
+    font-family: Inter, sans-serif;
+  }
+  .q-axis {
+    font-size: 9pt;
+    color: #64748B;
+    text-align: center;
+    font-weight: 600;
+    align-self: center;
+    justify-self: center;
+  }
+  .q-axis-top { grid-column: 2 / 4; grid-row: 1; }
+  .q-axis-bottom { grid-column: 2 / 4; grid-row: 4; }
+  .q-axis-left { grid-column: 1; grid-row: 2; writing-mode: vertical-rl; transform: rotate(180deg); }
+  .q-axis-right { grid-column: 1; grid-row: 3; writing-mode: vertical-rl; transform: rotate(180deg); }
+  .q-cell {
+    border-radius: 6pt;
+    padding: 10pt;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  .q-hoarders   { grid-column: 2; grid-row: 2; background: #F59E0B; }
+  .q-stars      { grid-column: 3; grid-row: 2; background: #22C55E; }
+  .q-deadweight { grid-column: 2; grid-row: 3; background: #94A3B8; }
+  .q-wasters    { grid-column: 3; grid-row: 3; background: #0194FE; }
+  .q-label { font-size: 10pt; font-weight: 600; opacity: 0.9; }
+  .q-count { font-size: 28pt; font-weight: 800; margin-top: 4pt; }
+  .q-pct   { font-size: 10pt; opacity: 0.85; }
+  .gap-bar-track {
+    background: #F1F5F9;
+    border-radius: 4pt;
+    height: 10pt;
+    width: 100%;
+    margin: 6pt 0 10pt 0;
+    overflow: hidden;
+  }
+  .gap-bar {
+    height: 10pt;
+    border-radius: 4pt;
+  }
 </style>
 </head>
 <body>
@@ -1667,6 +1719,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div class="section-divider"></div>
   <p class="lede">Every pillar is a deterministic check against published standards. Groups below match the WAIO weighting model.</p>
 
+  {% if pillar_bar_svg %}
+    <div class="pillar-chart-wrap" style="margin: 10pt 0 20pt 0;">
+      {{ pillar_bar_svg | safe }}
+    </div>
+  {% endif %}
+
   {% for group in pillar_groups %}
     <div class="group-header" style="--group-color: {{ group.color }};">
       <div class="gname">{{ group.name }}</div>
@@ -1713,6 +1771,34 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <div class="kpi"><div class="k-value" style="color: {{ green }};">{{ tipr.stars }}</div><div class="k-label">Stars</div></div>
       <div class="kpi"><div class="k-value" style="color: #F59E0B;">{{ tipr.hoarders }}</div><div class="k-label">Hoarders</div></div>
       <div class="kpi"><div class="k-value" style="color: #94A3B8;">{{ tipr.orphan_count }}</div><div class="k-label">Orphans</div></div>
+    </div>
+
+    <h3 style="margin-top: 16pt;">TIPR Quadrant Distribution</h3>
+    <div class="tipr-quadrant">
+      <div class="q-axis q-axis-top">High PageRank</div>
+      <div class="q-cell q-hoarders">
+        <div class="q-label">Hoarders</div>
+        <div class="q-count">{{ tipr.hoarders }}</div>
+        <div class="q-pct">{{ tipr.hoarders_pct }}%</div>
+      </div>
+      <div class="q-cell q-stars">
+        <div class="q-label">Stars</div>
+        <div class="q-count">{{ tipr.stars }}</div>
+        <div class="q-pct">{{ tipr.stars_pct }}%</div>
+      </div>
+      <div class="q-axis q-axis-left">Low Traffic</div>
+      <div class="q-axis q-axis-right">High Traffic</div>
+      <div class="q-cell q-deadweight">
+        <div class="q-label">Dead Weight</div>
+        <div class="q-count">{{ tipr.dead_weight }}</div>
+        <div class="q-pct">{{ tipr.dead_weight_pct }}%</div>
+      </div>
+      <div class="q-cell q-wasters">
+        <div class="q-label">Wasters</div>
+        <div class="q-count">{{ tipr.wasters }}</div>
+        <div class="q-pct">{{ tipr.wasters_pct }}%</div>
+      </div>
+      <div class="q-axis q-axis-bottom">Low PageRank</div>
     </div>
 
     <h3>Top 10 Pages by TIPR Score</h3>
@@ -1948,6 +2034,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
             {{ c.gap_score }}%
             <span class="lab">Content gap</span>
           </div>
+        </div>
+        <div class="gap-bar-track">
+          <div class="gap-bar"
+               style="width: {{ c.gap_score }}%; background: {{ c.gap_color }};"></div>
         </div>
         <div class="opt-counts">
           <div class="cell"><div class="num" style="color: {{ green }};">{{ c.add }}</div><div class="lab">Add</div></div>
