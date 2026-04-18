@@ -2241,15 +2241,16 @@ async def export_pdf(request: ExportRequest):
 
 @app.get("/api/audit/{audit_id}/export/pdf")
 async def export_branded_pdf(audit_id: str):
-    """Generate a branded premium 10-section PDF for an audit, fetched by ID."""
+    """Generate a branded premium 10-section PDF for an audit, fetched by ID.
+
+    Goes through get_audit_report() so the lazy TIPR / cluster compute fires
+    before rendering — guarantees the PDF and dashboard show the same data.
+    """
     try:
-        record = await get_audit_by_id(audit_id)
-        if not record:
+        report = await get_audit_report(audit_id)
+        if not report:
             raise HTTPException(status_code=404, detail="Audit not found")
-        report = record["report_json"] or {}
-        if isinstance(report, str):
-            report = json.loads(report)
-        report["audit_id"] = str(record.get("id") or audit_id)
+        report["audit_id"] = str(audit_id)
 
         pdf_bytes = generate_branded_pdf(report)
 
