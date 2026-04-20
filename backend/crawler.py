@@ -46,22 +46,33 @@ async def fetch_page(url: str) -> Tuple[str, BeautifulSoup]:
     If the content appears to be a JS-rendered SPA (minimal content),
     falls back to rendering via Playwright to ensure all JS is executed.
     """
+    html_content = ""
     try:
-        # Use run_in_executor for better typing compatibility with some type checkers
         loop = asyncio.get_running_loop()
         html_content = await loop.run_in_executor(None, fetch_url, url)
     except Exception as e:
-        logger.error(f"HTTP attempt failed for {url}: {e}")
-        raise ValueError(f"Failed to fetch {url}: {str(e)}")
+        # Bot-protected sites (Cloudflare, Akamai, etc.) often 403 on a plain
+        # requests client. A headless Chromium usually gets through, so treat
+        # any HTTP-layer failure as "try Playwright" rather than aborting.
+        logger.info(f"HTTP fetch failed for {url} ({e}); falling back to Playwright")
+        try:
+            html_content = await fetch_page_with_playwright(url)
+        except Exception as pw_err:
+            raise ValueError(
+                f"Failed to fetch {url}: HTTP error ({e}) and Playwright fallback failed ({pw_err})"
+            ) from pw_err
 
     soup = BeautifulSoup(html_content, 'lxml')
     body = soup.body
 
-    # Check if minimal content (indicator of JS-rendered SPA)
+    # If HTTP succeeded but content looks JS-rendered (thin body), upgrade to Playwright.
     if not body or len(body.text.strip()) < 100 or len(html_content) < 5000:
-        logger.info(f"Minimal content detected for {url}, falling back to Playwright...")
-        html_content = await fetch_page_with_playwright(url)
-        soup = BeautifulSoup(html_content, 'lxml')
+        logger.info(f"Minimal content detected for {url}, upgrading to Playwright...")
+        try:
+            html_content = await fetch_page_with_playwright(url)
+            soup = BeautifulSoup(html_content, 'lxml')
+        except Exception as pw_err:
+            logger.warning(f"Playwright upgrade failed for {url}, keeping HTTP result: {pw_err}")
 
     return html_content, soup
 
