@@ -230,6 +230,25 @@ def _is_agency_industry(industry: str | None) -> bool:
     )
 
 
+def _is_infrastructure_failure(description: str) -> bool:
+    """Findings describing tooling/infrastructure failure, not a real site issue.
+
+    These surface when a check itself couldn't run (Playwright timeout,
+    unreachable endpoint, etc.) — they belong in logs, not in an executive
+    brief about the site's performance. Filter them out so they don't end up
+    misattributed under an unrelated category in Supporting Detail.
+    """
+    d = (description or "").strip().lower()
+    if not d:
+        return False
+    return (
+        d.startswith("failed to run ")
+        or d.startswith("failed to analyze ")
+        or d.startswith("could not run ")
+        or d.startswith("could not analyze ")
+    )
+
+
 def _collect_findings(report: dict) -> List[Dict[str, Any]]:
     """Collect all findings from audit categories, sorted by severity."""
     findings: List[Dict[str, Any]] = []
@@ -239,6 +258,8 @@ def _collect_findings(report: dict) -> List[Dict[str, Any]]:
             if not isinstance(check_data, dict):
                 continue
             for f in check_data.get("findings", []):
+                if _is_infrastructure_failure(f.get("description", "")):
+                    continue
                 findings.append({**f, "pillar_key": pillar_key})
     severity_order = {"critical": 0, "high": 1, "medium": 2}
     findings.sort(key=lambda f: severity_order.get(f.get("severity", "medium"), 3))

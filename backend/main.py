@@ -1473,20 +1473,25 @@ async def _enrich_report_from_crawl(
 
         logger.info(f"Fetched {len(pages_data)} pages, {len(links_data)} links from DataForSEO")
 
-        # Short-circuit: DataForSEO crawled 0 pages. Almost always means the
-        # site blocked DataForSEO's crawler (Cloudflare / bot protection). All
-        # the downstream analysis (link graph, TIPR, clustering) needs at least
-        # one page to produce anything useful, so skip it and give the user an
-        # actionable message instead of the generic "try again" failure.
-        if not pages_data and not links_data:
+        # Short-circuit: DataForSEO crawl returned too little to build the
+        # multi-page artifacts (link graph, TIPR, clustering). Two common
+        # shapes we treat the same:
+        #   - 0 pages, 0 links  → crawler blocked outright (Cloudflare etc.)
+        #   - 1 page, 0 links   → crawler reached the homepage but couldn't
+        #     follow links (bot protection on deeper pages, or the site
+        #     genuinely only has a homepage)
+        # Either way, downstream views are meaningless — render the friendly
+        # no_data banner instead of a 1-node graph / empty clusters.
+        if len(pages_data) < 2 or not links_data:
             logger.warning(
-                f"DataForSEO returned 0 pages for task {task_id} — likely bot-protected site"
+                f"DataForSEO returned trivial crawl for task {task_id}: "
+                f"{len(pages_data)} pages, {len(links_data)} links — likely bot-protected site"
             )
             await update_audit_report(audit_id, {
                 "crawl_status": "no_data",
                 "crawl_stats": {
-                    "pages_crawled": summary.get("pages_crawled", 0),
-                    "pages_discovered": summary.get("pages_count", 0),
+                    "pages_crawled": summary.get("pages_crawled", len(pages_data)),
+                    "pages_discovered": summary.get("pages_count", len(pages_data)),
                     "internal_links": 0,
                     "external_links": 0,
                     "broken_links": 0,
@@ -1494,10 +1499,11 @@ async def _enrich_report_from_crawl(
                 },
                 "enrichment_status": "no_data",
                 "enrichment_progress": (
-                    "Site-wide crawl returned no pages — the site likely blocks automated "
-                    "crawlers (Cloudflare or similar). The single-page audit still succeeded; "
-                    "Link Graph, Link Intelligence, and Topic Clusters require a multi-page "
-                    "crawl and are unavailable for this site."
+                    "Site-wide crawl returned too few pages to build link architecture "
+                    "— the site likely blocks automated crawlers (Cloudflare or similar). "
+                    "The single-page audit still succeeded; Link Graph, Link Intelligence, "
+                    "and Topic Clusters require a multi-page crawl and are unavailable "
+                    "for this site."
                 ),
             })
             return
