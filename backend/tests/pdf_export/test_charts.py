@@ -70,6 +70,102 @@ def test_pillar_chart_svg_renders_in_section_03():
     assert ">85<" in block or "85" in block
 
 
+def test_scorecard_shows_compact_category_strip():
+    """Section 03 must show the 4 weight groups as a compact strip."""
+    html = _render_html(_full_report())
+    start = html.find("<!-- 3. 10-PILLAR SCORECARD")
+    end = html.find("<!-- 4. LINK INTELLIGENCE")
+    block = html[start:end]
+    assert "pillar-category-strip" in block
+    for group in ("Search &amp; Discovery", "AI Readiness", "Foundations", "UX &amp; Performance"):
+        assert group in block, f"Missing category chip: {group}"
+    for weight in ("36%", "28%", "26%", "10%"):
+        assert weight in block, f"Missing weight percentage: {weight}"
+
+
+def test_scorecard_no_longer_renders_individual_pillar_cards():
+    """The 10-pillar card grid is removed in favor of the bar chart + category strip."""
+    html = _render_html(_full_report())
+    start = html.find("<!-- 3. 10-PILLAR SCORECARD")
+    end = html.find("<!-- 4. LINK INTELLIGENCE")
+    block = html[start:end]
+    assert 'class="pillar-card"' not in block
+    assert 'class="pillar-grid' not in block
+
+
+def test_pillar_chart_includes_findings_count_per_pillar():
+    """Each pillar row in the bar chart must show findings count suffix."""
+    report = _full_report()
+    # Give accessibility 8 findings and structured_data 3 findings
+    report["categories"]["accessibility"]["findings"] = [
+        {"severity": "high", "description": f"f{i}"} for i in range(8)
+    ]
+    report["categories"]["structured_data"]["findings"] = [
+        {"severity": "medium", "description": f"f{i}"} for i in range(3)
+    ]
+    html = _render_html(report)
+    start = html.find("<!-- 3. 10-PILLAR SCORECARD")
+    end = html.find("<!-- 4. LINK INTELLIGENCE")
+    block = html[start:end]
+    assert "8 findings" in block
+    assert "3 findings" in block
+    # Pillars with zero findings should render "clean" sentinel
+    assert "clean" in block
+
+
+def test_pillar_findings_count_falls_back_to_nested_checks():
+    """When category has no top-level 'findings' list, count from checks[*].findings.
+    Real stored audit reports often only nest findings under checks."""
+    report = _full_report()
+    # Replace accessibility with the nested-only shape
+    report["categories"]["accessibility"] = {
+        "score": 44, "label": "Poor",
+        "checks": {
+            "axe_scan": {
+                "status": "fail",
+                "findings": [{"severity": "high"}] * 6,
+            },
+            "focus_styles": {
+                "status": "fail",
+                "findings": [{"severity": "medium"}],
+            },
+            "touch_targets": {
+                "status": "fail",
+                "findings": [{"severity": "medium"}],
+            },
+        },
+    }
+    html = _render_html(report)
+    start = html.find("<!-- 3. 10-PILLAR SCORECARD")
+    end = html.find("<!-- 4. LINK INTELLIGENCE")
+    block = html[start:end]
+    # 6 + 1 + 1 = 8 total findings across checks
+    assert "8 findings" in block
+
+
+def test_tipr_rewrites_awkward_zero_outbound_phrasing():
+    """Reason text with 'links out to 0 pages' must read naturally."""
+    reason = "**/news** receives 30 inbound links but only links out to 0 pages. It's accumulating authority."
+    out = pdf_mod._rewrite_zero_outbound_phrases(reason)
+    assert "only links out to 0 pages" not in out
+    assert "has no outbound internal links" in out
+
+
+def test_tipr_rewrites_preserve_nonzero_counts():
+    """The rewriter must NOT touch non-zero outbound phrasings."""
+    reason = "/hub links out to 12 pages and has 12 outbound links"
+    out = pdf_mod._rewrite_zero_outbound_phrases(reason)
+    assert "links out to 12 pages" in out
+    assert "12 outbound links" in out
+
+
+def test_gap_bar_height_is_visible_in_pdf():
+    """Gap bar must have non-trivial height so WeasyPrint renders it reliably."""
+    html = _render_html(_full_report())
+    # CSS style definitions must specify at least 12pt height for the bar
+    assert "height: 12pt" in html
+
+
 def test_tipr_quadrant_grid_rendered():
     html = _render_html(_full_report())
     start = html.find("<!-- 4. LINK INTELLIGENCE")

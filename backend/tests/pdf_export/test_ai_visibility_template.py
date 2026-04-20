@@ -145,6 +145,33 @@ def test_extract_discovery_brands_filters_purchase_decision_stopwords():
     assert "Huge" in {b["name"] for b in brands}
 
 
+def test_extract_discovery_brands_filters_two_word_purchase_phrases():
+    """Two-word selection-guide phrases must also be filtered."""
+    engines = {
+        "chatgpt": {
+            "responses_by_prompt": {
+                "1": {
+                    "text": (
+                        "Factors to weigh: **Project Scope**, **Project Timeline**, "
+                        "**Budget Range**, **Time Frame**, **Service Offering**, "
+                        "**Quality Standard**, **Industry Standard**, **Best Practice**. "
+                        "Top picks: **Lounge Lizard**, **Huge**."
+                    )
+                }
+            }
+        }
+    }
+    brands = pdf_mod._extract_discovery_brands(engines, own_brand="Belt Creative")
+    names_lower = {b["name"].lower() for b in brands}
+    for junk in (
+        "project scope", "project timeline", "budget range", "time frame",
+        "service offering", "quality standard", "industry standard", "best practice",
+    ):
+        assert junk not in names_lower, f"Two-word stopword '{junk}' must not appear as a brand"
+    assert "Lounge Lizard" in {b["name"] for b in brands}
+    assert "Huge" in {b["name"] for b in brands}
+
+
 def _render_html(report: dict) -> str:
     """Render just the template HTML (skip WeasyPrint) for fast assertion."""
     ctx = pdf_mod._prepare_context(report or {})

@@ -196,7 +196,7 @@ def _render_pillar_bar_chart_svg(pillar_groups: list[dict]) -> str:
     bottom_pad = 18
     label_w = 220
     bar_left = label_w + 10
-    bar_right_pad = 60
+    bar_right_pad = 120
     total_w = 720
     bar_w = total_w - bar_left - bar_right_pad
     total_h = top_pad + bottom_pad + row_h * len(rows)
@@ -250,6 +250,19 @@ def _render_pillar_bar_chart_svg(pillar_groups: list[dict]) -> str:
             f'<text x="{bar_left + bar_w + 8}" y="{y + 18}" '
             f'font-size="12" font-weight="700" fill="{color}">{score}</text>'
         )
+        # Findings count suffix (e.g., "· 8 findings")
+        findings_count = int(p.get("findings_count") or 0)
+        if findings_count:
+            findings_text = f"· {findings_count} finding{'s' if findings_count != 1 else ''}"
+            svg_parts.append(
+                f'<text x="{bar_left + bar_w + 36}" y="{y + 18}" '
+                f'font-size="10" fill="#64748B">{findings_text}</text>'
+            )
+        else:
+            svg_parts.append(
+                f'<text x="{bar_left + bar_w + 36}" y="{y + 18}" '
+                f'font-size="10" fill="#94A3B8">· clean</text>'
+            )
 
     svg_parts.append("</svg>")
     return "".join(svg_parts)
@@ -447,6 +460,18 @@ def _build_pillars(report: dict) -> list[dict]:
             cat = categories.get(key) or {}
             score = cat.get("score") if cat.get("score") is not None else None
             score_int = int(score) if isinstance(score, (int, float)) else 0
+            # Findings live at cat["findings"] per the auditor contract, but some
+            # stored reports only have them nested under cat["checks"][ck]["findings"].
+            top_level_findings = cat.get("findings")
+            if isinstance(top_level_findings, list) and top_level_findings:
+                findings_count = len(top_level_findings)
+            else:
+                findings_count = 0
+                for ck_val in (cat.get("checks") or {}).values():
+                    if isinstance(ck_val, dict):
+                        nested = ck_val.get("findings")
+                        if isinstance(nested, list):
+                            findings_count += len(nested)
             pillar_cards.append({
                 "key": key,
                 "label": label,
@@ -455,6 +480,7 @@ def _build_pillars(report: dict) -> list[dict]:
                 "label_text": cat.get("label") or "Not scored",
                 "color": _score_color(score_int),
                 "initial": label[:1],
+                "findings_count": findings_count,
             })
         result.append({
             "name": group["name"],
@@ -463,6 +489,35 @@ def _build_pillars(report: dict) -> list[dict]:
             "cards": pillar_cards,
         })
     return result
+
+
+_ZERO_OUTBOUND_REWRITES = [
+    # (pattern, replacement) — regex, case-insensitive
+    (re.compile(r"only links out to 0 pages", re.IGNORECASE),
+     "has no outbound internal links"),
+    (re.compile(r"with just 0 outbound links", re.IGNORECASE),
+     "with no outbound links"),
+    (re.compile(r"only passes equity to 0 pages", re.IGNORECASE),
+     "passes equity to no other pages"),
+    (re.compile(r"but sends only 0\b", re.IGNORECASE),
+     "but sends none"),
+    (re.compile(r"a dead end with only 0 outbound links", re.IGNORECASE),
+     "a dead end with no outbound links"),
+    (re.compile(r"\b0 outbound links\b", re.IGNORECASE),
+     "no outbound links"),
+    (re.compile(r"\blinks to 0 pages\b", re.IGNORECASE),
+     "has no outbound internal links"),
+]
+
+
+def _rewrite_zero_outbound_phrases(text: str) -> str:
+    """Rewrite awkward 'only 0 outbound' phrasings left by older TIPR engine
+    reason templates so they read naturally when outbound count is zero."""
+    if not text:
+        return text
+    for pattern, replacement in _ZERO_OUTBOUND_REWRITES:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def _build_tipr(report: dict) -> dict:
@@ -529,6 +584,10 @@ def _build_tipr(report: dict) -> dict:
         priority = (r.get("priority") or "").lower()
         # Strip markdown bold from reason — WeasyPrint will render the escaped text
         reason_clean = re.sub(r"\*\*([^*]+?)\*\*", r"\1", r.get("reason") or "")
+        # Rewrite awkward "0 outbound" phrasings produced by the TIPR engine's
+        # older reason templates. Engine has been fixed going forward; this
+        # keeps stored recommendations readable until the next recompute.
+        reason_clean = _rewrite_zero_outbound_phrases(reason_clean)
         top_recs.append({
             "source": _short_url(r.get("source_url", ""), 45),
             "target": _short_url(r.get("target_url", ""), 45),
@@ -695,6 +754,19 @@ _BRAND_STOPWORDS = {
     "budget", "timeline", "cost", "costs", "industry", "project", "projects",
     "service", "scope", "quality", "value", "solution", "solutions",
     "experience", "needs", "goals", "requirements", "deliverables",
+    # Two-word purchase-decision phrases that slip through single-word filters
+    "project scope", "project timeline", "project budget", "project size",
+    "project type", "project duration", "budget range", "time frame",
+    "timeline range", "service offering", "service offerings",
+    "quality standard", "quality standards", "industry standard",
+    "industry standards", "best practice", "best practices",
+    "design process", "development process", "discovery process",
+    "engagement model", "engagement models", "pricing model", "pricing models",
+    # Imperative action phrases LLMs sometimes bold as section headings
+    "define your needs", "define your goals", "define your budget",
+    "assess your needs", "identify your goals", "clarify your needs",
+    "set a budget", "set your timeline", "review case studies",
+    "check references", "evaluate portfolio",
 }
 
 
@@ -1438,6 +1510,32 @@ _TEMPLATE = r"""<!DOCTYPE html>
   }
 
   /* ───── Pillar scorecard ───── */
+  .pillar-category-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8pt;
+    margin: 8pt 0 14pt 0;
+  }
+  .category-chip {
+    background: #F8FAFC;
+    padding: 8pt 10pt;
+    border-radius: 6pt;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8pt;
+  }
+  .category-chip-name {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 9pt;
+    font-weight: 700;
+    color: #0F172A;
+  }
+  .category-chip-weight {
+    font-size: 11pt;
+    font-weight: 800;
+    color: #334155;
+  }
   .group-header {
     display: flex;
     justify-content: space-between;
@@ -1713,18 +1811,19 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .q-count { font-size: 28pt; font-weight: 800; margin-top: 4pt; }
   .q-pct   { font-size: 10pt; opacity: 0.85; }
   .gap-bar-track {
-    background: #E2E8F0;
-    border: 1px solid #CBD5E1;
-    border-radius: 4pt;
-    height: 10pt;
+    background: #F1F5F9;
+    border-radius: 6pt;
+    height: 12pt;
     width: 100%;
-    margin: 6pt 0 10pt 0;
+    margin: 8pt 0 12pt 0;
     overflow: hidden;
+    position: relative;
   }
   .gap-bar {
-    height: 10pt;
-    min-width: 2pt;
-    border-radius: 4pt;
+    height: 12pt;
+    min-width: 4pt;
+    border-radius: 6pt;
+    display: block;
   }
   .toc-list { list-style: none; padding: 0; margin: 20pt 0; }
   .toc-entry {
@@ -1831,36 +1930,22 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div class="section-divider"></div>
   <p class="lede">Every pillar is a deterministic check against published standards. Groups below match the WAIO weighting model.</p>
 
+  {% if pillar_groups %}
+    <div class="pillar-category-strip">
+      {% for group in pillar_groups %}
+        <div class="category-chip" style="border-left: 3px solid {{ group.color }};">
+          <div class="category-chip-name">{{ group.name }}</div>
+          <div class="category-chip-weight">{{ group.weight_pct }}%</div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
   {% if pillar_bar_svg %}
     <div class="pillar-chart-wrap" style="margin: 10pt 0 20pt 0;">
       {{ pillar_bar_svg | safe }}
     </div>
   {% endif %}
-
-  {% for group in pillar_groups %}
-    <div class="group-header" style="--group-color: {{ group.color }};">
-      <div class="gname">{{ group.name }}</div>
-      <div class="gweight">{{ group.weight_pct }}% of overall score</div>
-    </div>
-    <div class="pillar-grid {% if group.cards|length == 2 %}two-col{% endif %}">
-      {% for p in group.cards %}
-        <div class="pillar-card">
-          <div class="pillar-head">
-            <div class="pillar-initial" style="background: {{ p.color }}22; color: {{ p.color }};">{{ p.initial }}</div>
-            <div>
-              <div class="pillar-name">{{ p.label }}</div>
-              <div class="pillar-weight">{{ p.weight }}% weight</div>
-            </div>
-          </div>
-          <div class="pillar-score" style="color: {{ p.color }};">{{ p.score }}</div>
-          <div class="pillar-status">{{ p.label_text }}</div>
-          <div class="pillar-bar">
-            <div class="pillar-fill" style="width: {{ p.score }}%; background: {{ p.color }};"></div>
-          </div>
-        </div>
-      {% endfor %}
-    </div>
-  {% endfor %}
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════ -->

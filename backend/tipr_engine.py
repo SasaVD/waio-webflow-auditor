@@ -384,12 +384,29 @@ def generate_link_recommendations(
         existing_edges.add((source_url, target_url))
         return True
 
+    def _outbound_phrase(count: int, style: str = "links_out_to") -> str:
+        """Render outbound count naturally so outbound=0 doesn't read like an
+        unsubstituted template variable. Picks a phrasing based on the slot."""
+        c = int(count or 0)
+        if style == "links_out_to":
+            return "has no outbound internal links" if c == 0 else f"only links out to {c} pages"
+        if style == "with_N_outbound":
+            return "with no outbound links" if c == 0 else f"with just {c} outbound links"
+        if style == "passes_to_N":
+            return "passes equity to no other pages" if c == 0 else f"only passes equity to {c} pages"
+        if style == "sends_N":
+            return "sends none" if c == 0 else f"sends only {c}"
+        if style == "a_dead_end":
+            return "it's a dead end with no outbound links" if c == 0 else f"it's a dead end with only {c} outbound links"
+        # fallback
+        return f"{c} outbound links"
+
     # --- Hoarder redistribution templates ---
     _HOARDER_TEMPLATES = [
         lambda s, t: (
             f"**{_short_path(s['url'])}** receives {s['inbound_count'] or 0} inbound links "
-            f"but only links out to {s['outbound_count'] or 0} pages. It's accumulating "
-            f"authority without sharing it. Adding a contextual link to "
+            f"but {_outbound_phrase(s.get('outbound_count'), 'links_out_to')}. It's "
+            f"accumulating authority without sharing it. Adding a contextual link to "
             f"**{_short_path(t['url'])}** (currently underlinked with only "
             f"{t['inbound_count'] or 0} inbound links) would redistribute equity to your "
             f"{_url_cluster(t['url']).strip('/')} content."
@@ -398,29 +415,30 @@ def generate_link_recommendations(
             f"Your **{_url_cluster(s['url']).strip('/')}** hub page "
             f"**{_short_path(s['url'])}** is one of your strongest pages "
             f"(PR: {s['pagerank_score'] or 0:.0f}/100) but acts as an equity bottleneck "
-            f"with just {s['outbound_count'] or 0} outbound links. Link it to "
+            f"{_outbound_phrase(s.get('outbound_count'), 'with_N_outbound')}. Link it to "
             f"**{_short_path(t['url'])}** to strengthen your "
             f"{_url_cluster(t['url']).strip('/')} section."
         ),
         lambda s, t: (
             f"**{_short_path(s['url'])}** ranks in your top "
-            f"{pr_rank_cache.get(s['url'], 50)}% by internal authority but only passes "
-            f"equity to {s['outbound_count'] or 0} pages. Adding a link to the underserved "
-            f"**{_short_path(t['url'])}** would improve its discoverability and distribute "
-            f"link value more efficiently."
+            f"{pr_rank_cache.get(s['url'], 50)}% by internal authority but "
+            f"{_outbound_phrase(s.get('outbound_count'), 'passes_to_N')}. Adding a link to "
+            f"the underserved **{_short_path(t['url'])}** would improve its discoverability "
+            f"and distribute link value more efficiently."
         ),
         lambda s, t: (
             f"High-authority page **{_short_path(s['url'])}** "
             f"(PR: {s['pagerank_score'] or 0:.0f}) is hoarding equity — it receives "
-            f"{s['inbound_count'] or 0} links but sends only {s['outbound_count'] or 0}. "
+            f"{s['inbound_count'] or 0} links but "
+            f"{_outbound_phrase(s.get('outbound_count'), 'sends_N')}. "
             f"Connect it to **{_short_path(t['url'])}** in your "
             f"{_url_cluster(t['url']).strip('/')} cluster to balance equity flow."
         ),
         lambda s, t: (
             f"Navigation and content pages link heavily to "
             f"**{_short_path(s['url'])}**, giving it strong authority "
-            f"({s['inbound_count'] or 0} inbound links). But it's a dead end with only "
-            f"{s['outbound_count'] or 0} outbound links. Adding a link to "
+            f"({s['inbound_count'] or 0} inbound links). But "
+            f"{_outbound_phrase(s.get('outbound_count'), 'a_dead_end')}. Adding a link to "
             f"**{_short_path(t['url'])}** would pass some of that accumulated value to a "
             f"page that needs it."
         ),
