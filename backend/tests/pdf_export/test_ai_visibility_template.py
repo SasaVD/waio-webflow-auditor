@@ -9,6 +9,142 @@ if str(BACKEND) not in sys.path:
 import pdf_export_generator as pdf_mod
 
 
+def test_mentions_exclude_reputation_prompt_4():
+    """Reputation prompt (ID 4) mentions must not count toward discovery mentions."""
+    report = {
+        "ai_visibility": {
+            "brand_name": "Belt Creative",
+            "brand_name_source": "nlp",
+            "live_test": {
+                "engines": {
+                    "chatgpt": {
+                        "brand_mentioned_in": 1,  # inflated — counts reputation
+                        "status": "ok",
+                        "responses_by_prompt": {
+                            "1": {"text": "Top agencies: Huge, Clay."},  # no mention
+                            "2": {"text": "Consider Blue Fountain Media."},  # no mention
+                            "3": {"text": "Big Drop Inc stands out."},  # no mention
+                            "4": {"text": "Belt Creative is a Miami agency."},  # reputation
+                        },
+                    },
+                    "claude": {
+                        "brand_mentioned_in": 1,  # inflated — counts reputation
+                        "status": "ok",
+                        "responses_by_prompt": {
+                            "1": {"text": "Top Miami agencies: Lounge Lizard."},
+                            "4": {"text": "Belt Creative is known for..."},  # reputation
+                        },
+                    },
+                },
+                "prompts_used": [],
+            },
+            "mentions_database": {"total": 0},
+        }
+    }
+    ctx = pdf_mod._build_ai_visibility(report)
+    platforms_by_name = {p["name"]: p for p in ctx["platforms"]}
+    assert platforms_by_name["ChatGPT"]["mentions"] == 0
+    assert platforms_by_name["Claude"]["mentions"] == 0
+    assert ctx["total_mentions"] == 0
+    # Zero-state message triggers because discovery mentions are 0
+    assert ctx["zero_state"] is True
+
+
+def test_mentions_count_discovery_prompts_when_brand_appears():
+    """If brand shows up in a discovery response, it should be counted."""
+    report = {
+        "ai_visibility": {
+            "brand_name": "Belt Creative",
+            "brand_name_source": "nlp",
+            "live_test": {
+                "engines": {
+                    "chatgpt": {
+                        "brand_mentioned_in": 0,  # stale
+                        "status": "ok",
+                        "responses_by_prompt": {
+                            "1": {"text": "Miami agencies include Belt Creative and Huge."},
+                            "2": {"text": "Blue Fountain Media."},
+                            "4": {"text": "Belt Creative is well known."},
+                        },
+                    },
+                },
+                "prompts_used": [],
+            },
+            "mentions_database": {"total": 0},
+        }
+    }
+    ctx = pdf_mod._build_ai_visibility(report)
+    assert ctx["platforms"][0]["mentions"] == 1  # only prompt 1, not prompt 4
+    assert ctx["total_mentions"] == 1
+
+
+def test_brand_source_translates_internal_keys_to_plain_english():
+    """'override' / 'nlp' are internal; the report must show a readable label."""
+    override_report = {
+        "ai_visibility": {
+            "brand_name": "Belt Creative",
+            "brand_name_source": "override",
+            "live_test": {"engines": {}, "prompts_used": []},
+            "mentions_database": {"total": 0},
+        }
+    }
+    ctx = pdf_mod._build_ai_visibility(override_report)
+    assert ctx["brand_source"] == "manually verified"
+
+    nlp_report = {
+        "ai_visibility": {
+            "brand_name": "Belt Creative",
+            "brand_name_source": "nlp",
+            "live_test": {"engines": {}, "prompts_used": []},
+            "mentions_database": {"total": 0},
+        }
+    }
+    ctx_nlp = pdf_mod._build_ai_visibility(nlp_report)
+    assert "auto-detected" in ctx_nlp["brand_source"]
+
+
+def test_ai_visibility_template_avoids_internal_jargon():
+    """Rendered HTML must not expose 'Source: override' internal strings."""
+    report = {
+        "url": "https://example.com",
+        "ai_visibility": {
+            "brand_name": "Belt Creative",
+            "brand_name_source": "override",
+            "live_test": {"engines": {"chatgpt": {"brand_mentioned_in": 0, "status": "ok"}}, "prompts_used": []},
+            "mentions_database": {"total": 0},
+        },
+    }
+    ctx = pdf_mod._prepare_context(report)
+    template = pdf_mod._jinja_env.from_string(pdf_mod._TEMPLATE)
+    html = template.render(**ctx)
+    assert "Source: override" not in html
+    assert "manually verified" in html
+
+
+def test_extract_discovery_brands_filters_purchase_decision_stopwords():
+    """Selection-guide labels like Budget/Timeline/Scope must not appear as brands."""
+    engines = {
+        "chatgpt": {
+            "responses_by_prompt": {
+                "1": {
+                    "text": (
+                        "When choosing an agency, consider these factors: "
+                        "**Budget**, **Timeline**, **Scope**, and **Experience**. "
+                        "Top agencies: **Lounge Lizard**, **Huge**."
+                    )
+                },
+            }
+        }
+    }
+    brands = pdf_mod._extract_discovery_brands(engines, own_brand="Belt Creative")
+    names = {b["name"].lower() for b in brands}
+    for junk in ("budget", "timeline", "scope", "experience"):
+        assert junk not in names, f"Stopword '{junk}' must not appear as a brand"
+    # Real brands must still survive
+    assert "Lounge Lizard" in {b["name"] for b in brands}
+    assert "Huge" in {b["name"] for b in brands}
+
+
 def _render_html(report: dict) -> str:
     """Render just the template HTML (skip WeasyPrint) for fast assertion."""
     ctx = pdf_mod._prepare_context(report or {})

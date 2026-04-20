@@ -85,6 +85,22 @@ def test_tipr_quadrant_grid_rendered():
     assert "tipr-quadrant" in block
 
 
+def test_tipr_axis_labels_not_rotated():
+    html = _render_html(_full_report())
+    assert "Low Traffic" in html
+    assert "High Traffic" in html
+    assert "High PageRank" in html
+    assert "Low PageRank" in html
+    # Axis labels must not be rotated — readability requirement.
+    assert "writing-mode: vertical-rl" not in html
+    assert "transform: rotate(180deg)" not in html
+    # X-axis labels live above the cells (row 1), Y-axis labels live in col 1.
+    assert "q-axis-x-low" in html
+    assert "q-axis-x-high" in html
+    assert "q-axis-y-high" in html
+    assert "q-axis-y-low" in html
+
+
 def test_content_gap_bar_rendered_per_card():
     html = _render_html(_full_report())
     start = html.find("<!-- 7. CONTENT OPTIMIZER")

@@ -691,6 +691,10 @@ _BRAND_STOPWORDS = {
     "review", "reviews", "source", "sources", "note", "notes",
     "specialties", "specialty", "founded", "headquarters", "category",
     "minimum project size", "average hourly rate",
+    # Purchase-decision labels LLMs frequently bold in selection guides
+    "budget", "timeline", "cost", "costs", "industry", "project", "projects",
+    "service", "scope", "quality", "value", "solution", "solutions",
+    "experience", "needs", "goals", "requirements", "deliverables",
 }
 
 
@@ -781,13 +785,40 @@ def _build_ai_visibility(report: dict) -> dict:
         "ai_overview": "Google AI Overview",
     }
 
+    # Recount mentions from responses, excluding the reputation prompt (ID 4).
+    # The engine's stored `brand_mentioned_in` counts all prompts — which
+    # inflates discovery mentions because directly asking "tell me about
+    # <brand>" almost always mentions the brand.
+    brand_lower = (brand or "").strip().lower()
+
+    def _discovery_mentions(erdata: dict) -> int | None:
+        rbp = erdata.get("responses_by_prompt") or {}
+        if not isinstance(rbp, dict) or not rbp or not brand_lower:
+            return None
+        count = 0
+        for prompt_id, resp in rbp.items():
+            try:
+                if int(str(prompt_id)) == 4:
+                    continue
+            except (TypeError, ValueError):
+                pass
+            text = ""
+            if isinstance(resp, dict):
+                text = resp.get("text") or ""
+            elif isinstance(resp, str):
+                text = resp
+            if text and brand_lower in text.lower():
+                count += 1
+        return count
+
     platforms = []
     total_mentions = 0
     for engine_key, erdata in engines.items():
         if not isinstance(erdata, dict):
             continue
         label = platform_labels.get(engine_key, engine_key.replace("_", " ").title())
-        mentioned_in = int(erdata.get("brand_mentioned_in") or 0)
+        discovery_only = _discovery_mentions(erdata)
+        mentioned_in = discovery_only if discovery_only is not None else int(erdata.get("brand_mentioned_in") or 0)
         status = erdata.get("status") or "unknown"
         total_mentions += mentioned_in
         platforms.append({
@@ -866,10 +897,23 @@ def _build_ai_visibility(report: dict) -> dict:
             "discovery prompts — where buyers compare options without naming brands."
         )
 
+    # Translate internal source keys into client-facing labels.
+    brand_source_labels = {
+        "override": "manually verified",
+        "manual": "manually verified",
+        "user": "manually verified",
+        "nlp": "auto-detected from site content",
+        "auto": "auto-detected from site content",
+        "domain": "derived from domain name",
+    }
+    brand_source_label = brand_source_labels.get(
+        (source or "").lower(), "auto-detected from site content"
+    )
+
     return {
         "available": True,
         "brand": brand,
-        "brand_source": source.replace("_", " "),
+        "brand_source": brand_source_label,
         "platforms": platforms,
         "total_mentions": total_mentions,
         "zero_state": zero_state,
@@ -1635,7 +1679,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .tipr-quadrant {
     display: grid;
     grid-template-columns: 80pt 1fr 1fr;
-    grid-template-rows: 18pt 90pt 90pt 18pt;
+    grid-template-rows: 18pt 90pt 90pt;
     gap: 4pt;
     margin: 10pt 0 18pt 0;
     font-family: Inter, sans-serif;
@@ -1648,10 +1692,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
     align-self: center;
     justify-self: center;
   }
-  .q-axis-top { grid-column: 2 / 4; grid-row: 1; }
-  .q-axis-bottom { grid-column: 2 / 4; grid-row: 4; }
-  .q-axis-left { grid-column: 1; grid-row: 2; writing-mode: vertical-rl; transform: rotate(180deg); }
-  .q-axis-right { grid-column: 1; grid-row: 3; writing-mode: vertical-rl; transform: rotate(180deg); }
+  .q-axis-x-low  { grid-column: 2; grid-row: 1; }
+  .q-axis-x-high { grid-column: 3; grid-row: 1; }
+  .q-axis-y-high { grid-column: 1; grid-row: 2; }
+  .q-axis-y-low  { grid-column: 1; grid-row: 3; }
   .q-cell {
     border-radius: 6pt;
     padding: 10pt;
@@ -1669,7 +1713,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .q-count { font-size: 28pt; font-weight: 800; margin-top: 4pt; }
   .q-pct   { font-size: 10pt; opacity: 0.85; }
   .gap-bar-track {
-    background: #F1F5F9;
+    background: #E2E8F0;
+    border: 1px solid #CBD5E1;
     border-radius: 4pt;
     height: 10pt;
     width: 100%;
@@ -1678,6 +1723,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   }
   .gap-bar {
     height: 10pt;
+    min-width: 2pt;
     border-radius: 4pt;
   }
   .toc-list { list-style: none; padding: 0; margin: 20pt 0; }
@@ -1841,7 +1887,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
     <h3 style="margin-top: 16pt;">TIPR Quadrant Distribution</h3>
     <div class="tipr-quadrant">
-      <div class="q-axis q-axis-top">High PageRank</div>
+      <div class="q-axis q-axis-x-low">Low Traffic</div>
+      <div class="q-axis q-axis-x-high">High Traffic</div>
+      <div class="q-axis q-axis-y-high">High PageRank</div>
       <div class="q-cell q-hoarders">
         <div class="q-label">Hoarders</div>
         <div class="q-count">{{ tipr.hoarders }}</div>
@@ -1852,8 +1900,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <div class="q-count">{{ tipr.stars }}</div>
         <div class="q-pct">{{ tipr.stars_pct }}%</div>
       </div>
-      <div class="q-axis q-axis-left">Low Traffic</div>
-      <div class="q-axis q-axis-right">High Traffic</div>
+      <div class="q-axis q-axis-y-low">Low PageRank</div>
       <div class="q-cell q-deadweight">
         <div class="q-label">Dead Weight</div>
         <div class="q-count">{{ tipr.dead_weight }}</div>
@@ -1864,7 +1911,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <div class="q-count">{{ tipr.wasters }}</div>
         <div class="q-pct">{{ tipr.wasters_pct }}%</div>
       </div>
-      <div class="q-axis q-axis-bottom">Low PageRank</div>
     </div>
 
     <h3>Top 10 Pages by TIPR Score</h3>
@@ -1972,13 +2018,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
   {% else %}
     <div class="infobox">
       <div class="title">Brand: {{ ai_visibility.brand }}</div>
-      <div class="small">Source: {{ ai_visibility.brand_source }}</div>
+      <div class="small">Brand name {{ ai_visibility.brand_source }}</div>
     </div>
 
     <h3>Platforms Tested</h3>
     <table>
       <thead>
-        <tr><th>Platform</th><th>Status</th><th style="text-align:right;">Prompts with Brand Mention</th></tr>
+        <tr><th>Platform</th><th>Status</th><th style="text-align:right;">Discovery Prompts with Brand Mention</th></tr>
       </thead>
       <tbody>
         {% for p in ai_visibility.platforms %}

@@ -640,9 +640,14 @@ def run_tipr_analysis(
     # Build per-node lookup for inbound/outbound counts
     node_lookup: dict[str, dict] = {n["id"]: n for n in nodes}
 
+    # Derive in/out degrees directly from the adjacency matrix — this is the
+    # only source guaranteed to agree with the recommendations engine. Node
+    # metadata counts can drift (e.g. when a serialized graph omits per-node
+    # stats) and produced a bug where every recommendation read "0 outbound".
+    out_degrees = np.asarray(A.sum(axis=1)).flatten().astype(int)
+    in_degrees = np.asarray(A.sum(axis=0)).flatten().astype(int)
+
     # Assemble per-page TIPR data
-    # NOTE: node fields from DataForSEO can be None even when the key exists,
-    # so dict.get(key, default) is NOT sufficient — use `or 0` to coalesce.
     tipr_pages: list[dict] = []
     for i in range(N):
         url = idx_to_url[i]
@@ -657,8 +662,8 @@ def run_tipr_analysis(
             "tipr_rank": int(tipr_ranks[i]),
             "tipr_score": round(float(tipr_ranks[i]), 1),
             "classification": classifications[i],
-            "inbound_count": node.get("inbound") or 0,
-            "outbound_count": node.get("outbound") or 0,
+            "inbound_count": int(in_degrees[i]),
+            "outbound_count": int(out_degrees[i]),
             "click_depth": raw_depth if raw_depth is not None else -1,
             "cluster": node.get("cluster") or _url_cluster(url),
         })

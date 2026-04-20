@@ -12,6 +12,7 @@ nltk
 fpdf2
 weasyprint
 jinja2
+markdown
 resend
 aiosqlite
 asyncpg
