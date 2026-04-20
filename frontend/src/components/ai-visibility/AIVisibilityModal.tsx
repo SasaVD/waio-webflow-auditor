@@ -9,6 +9,26 @@ interface AIVisibilityModalProps {
   onClose: () => void;
 }
 
+// Mirror of backend AMBIGUOUS_COMMON_WORDS in ai_visibility/brand_resolver.py.
+// Keep both lists in sync.
+const AMBIGUOUS_COMMON_WORDS = new Set([
+  'your', 'this', 'that', 'them', 'they',
+  'home', 'work', 'team', 'test', 'demo', 'site', 'page', 'data',
+  'name', 'user', 'info', 'main', 'news', 'brand', 'company',
+  'business', 'website', 'service', 'product', 'client', 'customer',
+]);
+
+function validateBrandName(raw: string): string | null {
+  const s = raw.trim();
+  if (s.length <= 3) {
+    return `Brand name is too short (${s.length} character${s.length === 1 ? '' : 's'}). Use the full brand name — short acronyms like "VAN" match unrelated entities (Van Gogh, Beethoven) and return junk data.`;
+  }
+  if (AMBIGUOUS_COMMON_WORDS.has(s.toLowerCase())) {
+    return `"${s}" is a generic word that collides with unrelated entities in AI response corpora. Use the full brand name instead.`;
+  }
+  return null;
+}
+
 export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalProps) {
   const { brandPreview, fetchBrandPreview, startRecompute, error } = useAIVisibilityStore();
   const [brandName, setBrandName] = useState('');
@@ -29,8 +49,10 @@ export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalP
     }
   }, [brandPreview]);
 
+  const validationError = validateBrandName(brandName);
+
   const handleSubmit = async () => {
-    if (!brandName.trim()) return;
+    if (!brandName.trim() || validationError) return;
     setSubmitting(true);
     setSubmitError(null);
     const result = await startRecompute(auditId, brandName.trim());
@@ -108,12 +130,17 @@ export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalP
                     placeholder="Enter your brand name"
                     className="w-full px-3 py-2.5 bg-surface-overlay border border-border rounded-xl text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-all"
                   />
-                  {brandPreview?.override && (
+                  {validationError && brandName.trim() && (
+                    <p className="text-[11px] text-amber-400 mt-1.5 leading-snug">
+                      {validationError}
+                    </p>
+                  )}
+                  {!validationError && brandPreview?.override && (
                     <p className="text-[10px] text-text-muted mt-1">
                       Using manually set brand name from previous run
                     </p>
                   )}
-                  {!brandPreview?.override && brandPreview?.auto_extracted && (
+                  {!validationError && !brandPreview?.override && brandPreview?.auto_extracted && (
                     <p className="text-[10px] text-text-muted mt-1">
                       Auto-detected from NLP analysis (salience{' '}
                       {brandPreview.auto_extracted_salience
@@ -173,7 +200,7 @@ export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalP
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={submitting || !brandName.trim()}
+                  disabled={submitting || !brandName.trim() || !!validationError}
                   className="px-5 py-2 text-sm font-bold text-white bg-accent hover:bg-accent-hover rounded-xl shadow-glow-accent/20 hover:shadow-glow-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? 'Starting...' : 'Run Analysis'}

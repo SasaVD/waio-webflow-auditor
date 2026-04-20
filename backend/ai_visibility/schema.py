@@ -107,3 +107,15 @@ class SOVResult:
 class BrandExtractionError(Exception):
     """Raised when no brand name can be auto-extracted."""
     pass
+
+
+class BrandValidationError(Exception):
+    """Raised when a user-supplied brand name is too ambiguous for entity matching.
+
+    DataForSEO's brand_entities scope does token-level matching against named
+    entities in its pre-indexed corpus. Short or common-word brands collide
+    with unrelated entities (e.g. "VAN" matches Van Gogh, Ronnie Van Zant,
+    Ludwig van Beethoven) and return junk data. We reject these before
+    kicking off an analysis run.
+    """
+    pass

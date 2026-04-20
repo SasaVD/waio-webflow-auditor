@@ -1,7 +1,46 @@
 """Resolve brand name from NLP entities or user override."""
-from .schema import BrandInfo, BrandExtractionError
+from .schema import BrandInfo, BrandExtractionError, BrandValidationError
 
 SALIENCE_THRESHOLD = 0.3
+
+MIN_BRAND_LENGTH = 4
+
+# Lowercased tokens that collide with unrelated named entities in AI response
+# corpora. Mostly name particles (Van Gogh, Ludwig van Beethoven, Mies van
+# der Rohe) and generic English words that users sometimes paste instead of
+# a real brand. Length check above catches <4 chars, so entries here are
+# the >=4 char common words worth blocking explicitly.
+AMBIGUOUS_COMMON_WORDS = frozenset({
+    # Name particles / articles that appear as standalone 4+ char words
+    "your", "this", "that", "them", "they",
+    # Generic nouns people paste when unsure what to type
+    "home", "work", "team", "test", "demo", "site", "page", "data",
+    "name", "user", "info", "main", "news", "brand", "company",
+    "business", "website", "service", "product", "client", "customer",
+})
+
+
+def validate_brand_name(brand: str) -> str:
+    """Validate a user-supplied brand name before running AI Visibility.
+
+    Returns the trimmed brand name on success.
+    Raises BrandValidationError with a user-facing message on failure.
+    """
+    s = (brand or "").strip()
+    if len(s) <= 3:
+        raise BrandValidationError(
+            f"Brand name '{s}' is too short ({len(s)} character"
+            f"{'s' if len(s) != 1 else ''}). "
+            "Use the full brand name (e.g. 'Veza Network' not 'VAN') — "
+            "short acronyms match unrelated entities in AI response corpora "
+            "(Van Gogh, Beethoven, etc.) and return junk data."
+        )
+    if s.lower() in AMBIGUOUS_COMMON_WORDS:
+        raise BrandValidationError(
+            f"'{s}' is a generic word that collides with unrelated entities "
+            "in AI response corpora. Use the full brand name instead."
+        )
+    return s
 
 
 def resolve_brand(
