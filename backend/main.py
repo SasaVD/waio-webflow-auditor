@@ -2477,17 +2477,6 @@ async def recompute_ai_visibility(audit_id: str, body: dict = Body(...)):
 
     brand_name = body.get("brand_name", "").strip() if body.get("brand_name") else None
 
-    # Reject ambiguous brand tokens (e.g. "VAN") before starting — DataForSEO's
-    # brand_entities scope would match name particles (Van Gogh, Beethoven)
-    # and return junk data.
-    if brand_name:
-        from ai_visibility.brand_resolver import validate_brand_name
-        from ai_visibility.schema import BrandValidationError
-        try:
-            brand_name = validate_brand_name(brand_name)
-        except BrandValidationError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
     # Write running state immediately so poller sees it
     from datetime import datetime as dt, timezone as tz
     started_at = dt.now(tz.utc).isoformat()

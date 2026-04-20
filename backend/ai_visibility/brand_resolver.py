@@ -1,15 +1,14 @@
 """Resolve brand name from NLP entities or user override."""
-from .schema import BrandInfo, BrandExtractionError, BrandValidationError
+from .schema import BrandInfo, BrandExtractionError
 
 SALIENCE_THRESHOLD = 0.3
 
-MIN_BRAND_LENGTH = 4
+AMBIGUITY_LENGTH_THRESHOLD = 3
 
 # Lowercased tokens that collide with unrelated named entities in AI response
 # corpora. Mostly name particles (Van Gogh, Ludwig van Beethoven, Mies van
 # der Rohe) and generic English words that users sometimes paste instead of
-# a real brand. Length check above catches <4 chars, so entries here are
-# the >=4 char common words worth blocking explicitly.
+# a real brand.
 AMBIGUOUS_COMMON_WORDS = frozenset({
     # Name particles / articles that appear as standalone 4+ char words
     "your", "this", "that", "them", "they",
@@ -20,27 +19,33 @@ AMBIGUOUS_COMMON_WORDS = frozenset({
 })
 
 
-def validate_brand_name(brand: str) -> str:
-    """Validate a user-supplied brand name before running AI Visibility.
+def check_brand_ambiguity(brand: str) -> str | None:
+    """Return an advisory warning if the brand token is likely to produce
+    noisy results, or None if it looks safe.
 
-    Returns the trimmed brand name on success.
-    Raises BrandValidationError with a user-facing message on failure.
+    This is intentionally non-blocking: short acronyms (IBM, HP, NIO) and
+    generic words can be legitimate brands, and exposing the collision is
+    itself strategic signal — it tells the brand exactly how much their
+    name blurs with unrelated entities in AI responses. The UI shows this
+    warning and lets the user proceed anyway.
     """
     s = (brand or "").strip()
-    if len(s) <= 3:
-        raise BrandValidationError(
-            f"Brand name '{s}' is too short ({len(s)} character"
-            f"{'s' if len(s) != 1 else ''}). "
-            "Use the full brand name (e.g. 'Veza Network' not 'VAN') — "
-            "short acronyms match unrelated entities in AI response corpora "
-            "(Van Gogh, Beethoven, etc.) and return junk data."
+    if not s:
+        return None  # empty input is handled separately by the caller
+    if len(s) <= AMBIGUITY_LENGTH_THRESHOLD:
+        return (
+            f"'{s}' is a short token ({len(s)} character"
+            f"{'s' if len(s) != 1 else ''}). Short acronyms often match "
+            "unrelated entities in AI response corpora (e.g. 'VAN' matches "
+            "Van Gogh, Beethoven, Van Halen). Results may include noise — "
+            "this can itself reveal positioning conflicts worth addressing."
         )
     if s.lower() in AMBIGUOUS_COMMON_WORDS:
-        raise BrandValidationError(
-            f"'{s}' is a generic word that collides with unrelated entities "
-            "in AI response corpora. Use the full brand name instead."
+        return (
+            f"'{s}' is a generic word that may collide with unrelated "
+            "entities in AI response corpora. Results may include noise."
         )
-    return s
+    return None
 
 
 def resolve_brand(

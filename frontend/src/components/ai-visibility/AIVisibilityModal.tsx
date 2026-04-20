@@ -18,13 +18,17 @@ const AMBIGUOUS_COMMON_WORDS = new Set([
   'business', 'website', 'service', 'product', 'client', 'customer',
 ]);
 
-function validateBrandName(raw: string): string | null {
+// Advisory only — short acronyms (IBM, NIO, HP) and generic words can be
+// legitimate brands, and exposing the collision is itself strategic signal.
+// Returns a warning to display; submit stays enabled.
+function checkBrandAmbiguity(raw: string): string | null {
   const s = raw.trim();
+  if (!s) return null;
   if (s.length <= 3) {
-    return `Brand name is too short (${s.length} character${s.length === 1 ? '' : 's'}). Use the full brand name — short acronyms like "VAN" match unrelated entities (Van Gogh, Beethoven) and return junk data.`;
+    return `"${s}" is a short token (${s.length} character${s.length === 1 ? '' : 's'}). Short acronyms often match unrelated entities in AI response corpora (e.g. "VAN" matches Van Gogh, Beethoven, Van Halen). Results may include noise — which can itself reveal a positioning conflict worth addressing.`;
   }
   if (AMBIGUOUS_COMMON_WORDS.has(s.toLowerCase())) {
-    return `"${s}" is a generic word that collides with unrelated entities in AI response corpora. Use the full brand name instead.`;
+    return `"${s}" is a generic word that may collide with unrelated entities in AI response corpora. Results may include noise.`;
   }
   return null;
 }
@@ -49,10 +53,10 @@ export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalP
     }
   }, [brandPreview]);
 
-  const validationError = validateBrandName(brandName);
+  const ambiguityWarning = checkBrandAmbiguity(brandName);
 
   const handleSubmit = async () => {
-    if (!brandName.trim() || validationError) return;
+    if (!brandName.trim()) return;
     setSubmitting(true);
     setSubmitError(null);
     const result = await startRecompute(auditId, brandName.trim());
@@ -130,17 +134,17 @@ export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalP
                     placeholder="Enter your brand name"
                     className="w-full px-3 py-2.5 bg-surface-overlay border border-border rounded-xl text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-all"
                   />
-                  {validationError && brandName.trim() && (
+                  {ambiguityWarning && brandName.trim() && (
                     <p className="text-[11px] text-amber-400 mt-1.5 leading-snug">
-                      {validationError}
+                      {ambiguityWarning}
                     </p>
                   )}
-                  {!validationError && brandPreview?.override && (
+                  {!ambiguityWarning && brandPreview?.override && (
                     <p className="text-[10px] text-text-muted mt-1">
                       Using manually set brand name from previous run
                     </p>
                   )}
-                  {!validationError && !brandPreview?.override && brandPreview?.auto_extracted && (
+                  {!ambiguityWarning && !brandPreview?.override && brandPreview?.auto_extracted && (
                     <p className="text-[10px] text-text-muted mt-1">
                       Auto-detected from NLP analysis (salience{' '}
                       {brandPreview.auto_extracted_salience
@@ -200,10 +204,10 @@ export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalP
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={submitting || !brandName.trim() || !!validationError}
+                  disabled={submitting || !brandName.trim()}
                   className="px-5 py-2 text-sm font-bold text-white bg-accent hover:bg-accent-hover rounded-xl shadow-glow-accent/20 hover:shadow-glow-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {submitting ? 'Starting...' : 'Run Analysis'}
+                  {submitting ? 'Starting...' : ambiguityWarning ? 'Run Anyway' : 'Run Analysis'}
                 </button>
               </div>
             </div>

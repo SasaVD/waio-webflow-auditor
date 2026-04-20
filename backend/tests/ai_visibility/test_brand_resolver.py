@@ -3,8 +3,8 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import pytest
-from ai_visibility.brand_resolver import resolve_brand, validate_brand_name
-from ai_visibility.schema import BrandInfo, BrandExtractionError, BrandValidationError
+from ai_visibility.brand_resolver import resolve_brand, check_brand_ambiguity
+from ai_visibility.schema import BrandInfo, BrandExtractionError
 
 
 def test_override_always_wins():
@@ -79,54 +79,53 @@ def test_override_whitespace_falls_through_to_nlp():
     assert result.source == "nlp"
 
 
-# validate_brand_name — guards against brand tokens that collide with
-# common entities in AI response corpora (e.g. "VAN" → Van Gogh, Beethoven).
+# check_brand_ambiguity — advisory warning, never raises. Short acronyms
+# (IBM, NIO, HP) and generic words can be legitimate brands and exposing
+# the collision is itself strategic signal, so we warn but don't block.
 
-def test_validate_accepts_full_brand_name():
-    assert validate_brand_name("Veza Network") == "Veza Network"
-    assert validate_brand_name("HubSpot") == "HubSpot"
-    assert validate_brand_name("Belt Creative") == "Belt Creative"
-
-
-def test_validate_trims_whitespace():
-    assert validate_brand_name("  Veza Network  ") == "Veza Network"
+def test_ambiguity_none_for_full_brand_name():
+    assert check_brand_ambiguity("Veza Network") is None
+    assert check_brand_ambiguity("HubSpot") is None
+    assert check_brand_ambiguity("Belt Creative") is None
 
 
-def test_validate_rejects_three_char_acronym():
-    with pytest.raises(BrandValidationError, match="too short"):
-        validate_brand_name("VAN")
+def test_ambiguity_none_for_empty_input():
+    # Empty string isn't "ambiguous" — it's invalid input, handled elsewhere.
+    assert check_brand_ambiguity("") is None
+    assert check_brand_ambiguity("   ") is None
 
 
-def test_validate_rejects_two_char_acronym():
-    with pytest.raises(BrandValidationError, match="too short"):
-        validate_brand_name("HP")
+def test_ambiguity_warns_on_three_char_acronym():
+    warning = check_brand_ambiguity("VAN")
+    assert warning is not None
+    assert "short token" in warning
+    assert "VAN" in warning
 
 
-def test_validate_rejects_single_char():
-    with pytest.raises(BrandValidationError, match="too short"):
-        validate_brand_name("X")
+def test_ambiguity_warns_on_two_char_acronym():
+    warning = check_brand_ambiguity("HP")
+    assert warning is not None
+    assert "short token" in warning
 
 
-def test_validate_rejects_empty_string():
-    with pytest.raises(BrandValidationError, match="too short"):
-        validate_brand_name("")
+def test_ambiguity_warns_on_single_char():
+    warning = check_brand_ambiguity("X")
+    assert warning is not None
+    assert "1 character" in warning
 
 
-def test_validate_rejects_whitespace_only():
-    with pytest.raises(BrandValidationError, match="too short"):
-        validate_brand_name("   ")
+def test_ambiguity_warns_on_common_word():
+    warning = check_brand_ambiguity("website")
+    assert warning is not None
+    assert "generic word" in warning
 
 
-def test_validate_rejects_common_word():
-    with pytest.raises(BrandValidationError, match="generic word"):
-        validate_brand_name("website")
+def test_ambiguity_warns_on_common_word_case_insensitive():
+    warning = check_brand_ambiguity("Company")
+    assert warning is not None
+    assert "generic word" in warning
 
 
-def test_validate_rejects_common_word_case_insensitive():
-    with pytest.raises(BrandValidationError, match="generic word"):
-        validate_brand_name("Company")
-
-
-def test_validate_accepts_four_char_brand():
-    # Legitimate 4-char brand (e.g. Nike) — above length floor, not in word list
-    assert validate_brand_name("Nike") == "Nike"
+def test_ambiguity_none_for_four_char_brand():
+    # Legitimate 4-char brand — above threshold, not in word list
+    assert check_brand_ambiguity("Nike") is None
