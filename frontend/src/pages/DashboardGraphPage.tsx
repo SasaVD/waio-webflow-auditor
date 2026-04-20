@@ -88,6 +88,20 @@ export default function DashboardGraphPage() {
             Please try running the audit again. If the problem persists, check your DataForSEO configuration.
           </p>
         </motion.div>
+      ) : !hasNodes && enrichment.status === 'no_data' ? (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-surface-raised border border-border rounded-2xl p-10 text-center"
+        >
+          <AlertCircle size={32} className="text-amber-500 mx-auto mb-4" />
+          <p className="text-sm font-semibold text-text mb-1">
+            Link graph unavailable for this site
+          </p>
+          <p className="text-xs text-text-muted max-w-md mx-auto">
+            {enrichment.progress || 'The site blocks automated crawlers (Cloudflare or similar), so no pages were returned. Link graph requires a successful multi-page crawl.'}
+          </p>
+        </motion.div>
       ) : (
         <LinkGraph auditId={auditId ?? ''} data={graphData} tiprPages={tiprPages} />
       )}

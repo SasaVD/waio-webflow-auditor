@@ -199,8 +199,8 @@ class DataForSEOClient:
 
         result = tasks[0]["result"][0]
         return {
-            "items": result.get("items", []),
-            "total_count": result.get("items_count", 0),
+            "items": result.get("items") or [],
+            "total_count": result.get("items_count") or 0,
         }
 
     async def get_all_pages(self, task_id: str) -> List[Dict[str, Any]]:
@@ -248,8 +248,8 @@ class DataForSEOClient:
 
         result = tasks[0]["result"][0]
         return {
-            "items": result.get("items", []),
-            "total_count": result.get("items_count", 0),
+            "items": result.get("items") or [],
+            "total_count": result.get("items_count") or 0,
         }
 
     async def get_all_links(self, task_id: str) -> List[Dict[str, Any]]:
@@ -294,8 +294,8 @@ class DataForSEOClient:
 
         result = tasks[0]["result"][0]
         return {
-            "items": result.get("items", []),
-            "total_count": result.get("items_count", 0),
+            "items": result.get("items") or [],
+            "total_count": result.get("items_count") or 0,
         }
 
     # ── AI Optimization (LLM Mentions + Responses) ────────────────

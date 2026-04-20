@@ -1473,6 +1473,35 @@ async def _enrich_report_from_crawl(
 
         logger.info(f"Fetched {len(pages_data)} pages, {len(links_data)} links from DataForSEO")
 
+        # Short-circuit: DataForSEO crawled 0 pages. Almost always means the
+        # site blocked DataForSEO's crawler (Cloudflare / bot protection). All
+        # the downstream analysis (link graph, TIPR, clustering) needs at least
+        # one page to produce anything useful, so skip it and give the user an
+        # actionable message instead of the generic "try again" failure.
+        if not pages_data and not links_data:
+            logger.warning(
+                f"DataForSEO returned 0 pages for task {task_id} — likely bot-protected site"
+            )
+            await update_audit_report(audit_id, {
+                "crawl_status": "no_data",
+                "crawl_stats": {
+                    "pages_crawled": summary.get("pages_crawled", 0),
+                    "pages_discovered": summary.get("pages_count", 0),
+                    "internal_links": 0,
+                    "external_links": 0,
+                    "broken_links": 0,
+                    "broken_resources": 0,
+                },
+                "enrichment_status": "no_data",
+                "enrichment_progress": (
+                    "Site-wide crawl returned no pages — the site likely blocks automated "
+                    "crawlers (Cloudflare or similar). The single-page audit still succeeded; "
+                    "Link Graph, Link Intelligence, and Topic Clusters require a multi-page "
+                    "crawl and are unavailable for this site."
+                ),
+            })
+            return
+
         # Build crawl_stats
         crawl_stats = {
             "pages_crawled": summary.get("pages_crawled", 0),

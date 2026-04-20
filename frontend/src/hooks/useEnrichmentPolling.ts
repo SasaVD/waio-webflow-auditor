@@ -4,13 +4,13 @@ import { useAuditStore } from '../stores/auditStore';
 const apiBase = import.meta.env.PROD ? '' : 'http://127.0.0.1:8000';
 
 interface EnrichmentStatus {
-  enrichment_status: 'polling' | 'complete' | 'failed' | 'timed_out';
+  enrichment_status: 'polling' | 'complete' | 'failed' | 'timed_out' | 'no_data';
   enrichment_progress: string;
   has_link_graph: boolean;
   has_topic_clusters: boolean;
 }
 
-export type EnrichmentState = 'polling' | 'complete' | 'failed' | 'timed_out' | 'idle';
+export type EnrichmentState = 'polling' | 'complete' | 'failed' | 'timed_out' | 'no_data' | 'idle';
 
 interface UseEnrichmentPollingResult {
   status: EnrichmentState;
@@ -35,6 +35,7 @@ export function useEnrichmentPolling(auditId: string | undefined): UseEnrichment
     initialStatus === 'polling' ? 'polling'
       : initialStatus === 'failed' ? 'failed'
       : initialStatus === 'timed_out' ? 'timed_out'
+      : initialStatus === 'no_data' ? 'no_data'
       : initialStatus === 'complete' ? 'complete'
       : 'idle'
   );
@@ -63,6 +64,9 @@ export function useEnrichmentPolling(auditId: string | undefined): UseEnrichment
     } else if (rs === 'failed') {
       setStatus('failed');
       setProgress(report?.enrichment_progress ?? '');
+    } else if (rs === 'no_data') {
+      setStatus('no_data');
+      setProgress(report?.enrichment_progress ?? '');
     }
   }, [report?.enrichment_status, report?.enrichment_progress, report?.link_analysis]);
 
@@ -87,6 +91,8 @@ export function useEnrichmentPolling(auditId: string | undefined): UseEnrichment
         setStatus('failed');
       } else if (data.enrichment_status === 'timed_out') {
         setStatus('timed_out');
+      } else if (data.enrichment_status === 'no_data') {
+        setStatus('no_data');
       }
     } catch {
       // Silently ignore network errors — will retry next interval

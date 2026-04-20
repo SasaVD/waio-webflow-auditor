@@ -345,6 +345,20 @@ export default function DashboardPagesPage() {
             Please try running the audit again.
           </p>
         </motion.div>
+      ) : !hasData && enrichment.status === 'no_data' ? (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-surface-raised border border-border rounded-xl p-10 text-center"
+        >
+          <AlertCircle size={32} className="text-amber-500 mx-auto mb-4" />
+          <p className="text-sm font-semibold text-text mb-1">
+            Page-level data unavailable for this site
+          </p>
+          <p className="text-xs text-text-muted max-w-md mx-auto">
+            {enrichment.progress || 'The site blocks automated crawlers (Cloudflare or similar), so no pages were returned. Page-level insights require a successful multi-page crawl.'}
+          </p>
+        </motion.div>
       ) : hasData ? (
         <>
           {/* Stats row */}

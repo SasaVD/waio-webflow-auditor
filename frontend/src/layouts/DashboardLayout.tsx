@@ -433,6 +433,26 @@ export default function DashboardLayout() {
               </div>
             </motion.div>
           )}
+          {enrichment.status === 'no_data' && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mx-4 mt-4 lg:mx-6 lg:mt-5"
+            >
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3.5 flex items-start gap-3">
+                <AlertTriangle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-900">
+                    Site-wide crawl blocked by bot protection
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    {enrichment.progress || 'The site blocks automated crawlers (Cloudflare or similar), so DataForSEO couldn\'t fetch any pages. Your single-page audit is complete, but Link Graph, Link Intelligence, and Topic Clusters require a multi-page crawl and are unavailable for this site.'}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
         <Outlet />
       </div>
