@@ -320,7 +320,7 @@ export default function DashboardAIVisibilityPage() {
       </motion.div>
 
       {/* ── Section 4.5: Competitive Intelligence (brands mentioned in discovery) ── */}
-      {competitorMentions.length > 0 && (
+      {(competitorMentions.brand || competitorMentions.competitors.length > 0) && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -331,12 +331,36 @@ export default function DashboardAIVisibilityPage() {
             Brands Mentioned in Discovery Prompts
           </h2>
           <p className="text-xs text-text-muted mb-4">
-            These brands appeared in AI responses to your industry's discovery prompts — even though{' '}
-            <strong className="text-text">{data.brand_name}</strong> was not mentioned.
-            These are your AI visibility competitors.
+            {competitorMentions.brand ? (
+              <>
+                <strong className="text-text">{data.brand_name}</strong> appeared{' '}
+                {competitorMentions.brand.count}× in AI responses to your industry's discovery prompts
+                {normalizeBrand(competitorMentions.brand.name) !== normalizeBrand(data.brand_name) && (
+                  <> (spelled as <em>"{competitorMentions.brand.name}"</em>)</>
+                )}
+                .
+                {competitorMentions.competitors.length > 0
+                  ? ' These competitors appeared alongside you.'
+                  : ' No other brands were called out in the responses.'}
+              </>
+            ) : (
+              <>
+                These brands appeared in AI responses to your industry's discovery prompts — even though{' '}
+                <strong className="text-text">{data.brand_name}</strong> was not mentioned.
+                These are your AI visibility competitors.
+              </>
+            )}
           </p>
           <div className="flex flex-wrap gap-2">
-            {competitorMentions.slice(0, 20).map((brand) => (
+            {competitorMentions.brand && (
+              <span
+                className="text-xs font-semibold text-accent bg-accent/10 border border-accent/30 px-2.5 py-1 rounded-lg"
+              >
+                {competitorMentions.brand.name}
+                <span className="text-accent/70 ml-1">×{competitorMentions.brand.count}</span>
+              </span>
+            )}
+            {competitorMentions.competitors.slice(0, 20).map((brand) => (
               <span
                 key={brand.name}
                 className="text-xs font-semibold text-text-secondary bg-surface-overlay px-2.5 py-1 rounded-lg"
@@ -493,19 +517,64 @@ interface BrandMention {
   count: number;
 }
 
+interface DiscoveryMentions {
+  brand: BrandMention | null;   // target brand, fuzzy-matched across spelling variants
+  competitors: BrandMention[];  // all other brands
+}
+
+function normalizeBrand(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const dp: number[] = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1]
+        ? prev
+        : Math.min(prev, dp[j], dp[j - 1]) + 1;
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+}
+
+function isBrandMatch(extracted: string, brandName: string): boolean {
+  const a = normalizeBrand(extracted);
+  const b = normalizeBrand(brandName);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // Substring handles "Lounge Lizard Inc" vs "Lounge Lizard"
+  if (a.includes(b) || b.includes(a)) return true;
+  // Typo tolerance: distance up to ~20% of the longer string, min 1
+  const longer = Math.max(a.length, b.length);
+  const tolerance = Math.max(1, Math.floor(longer * 0.2));
+  return levenshtein(a, b) <= tolerance;
+}
+
 function extractCompetitorMentions(
   engines: Record<string, { status: string; responses_by_prompt: Record<string, { text: string; mentioned: boolean }> }>,
   prompts: Array<{ id: number; text: string; category: string }>,
   brandName: string,
-): BrandMention[] {
+): DiscoveryMentions {
   // Only analyze discovery prompts (not reputation)
   const discoveryIds = new Set(
     prompts.filter((p) => p.category === 'discovery').map((p) => String(p.id))
   );
 
-  // Extract bold names from markdown responses
-  const brandCounts: Record<string, number> = {};
-  const brandNameLower = brandName.toLowerCase();
+  const competitorCounts: Record<string, number> = {};
+  let selfCount = 0;
+  let selfDisplayName: string | null = null;
 
   for (const engine of Object.values(engines)) {
     if (engine.status !== 'ok') continue;
@@ -516,19 +585,32 @@ function extractCompetitorMentions(
       const boldMatches = response.text.matchAll(/\*\*(?:\d+\.\s*)?([A-Z][A-Za-z\s&.'-]+?)(?:\s*[-—:]|\*\*)/g);
       for (const match of boldMatches) {
         const name = match[1].trim();
-        // Skip the audited brand itself, single words, and generic terms
+        // Skip short tokens, runaway phrases, and generic intros
         if (
-          name.toLowerCase() === brandNameLower ||
           name.length < 3 ||
           name.split(' ').length > 4 ||
           /^(here|the|key|top|core|what|how|why|additional|notable|other|factors)/i.test(name)
         ) continue;
-        brandCounts[name] = (brandCounts[name] || 0) + 1;
+        // Target brand (fuzzy-matched across spelling variants) — aggregate separately
+        if (isBrandMatch(name, brandName)) {
+          selfCount++;
+          // Prefer the first spelling the engines actually used (e.g. "Lounge Lizard"
+          // surfaces even if user typed "Longe Lizard")
+          if (!selfDisplayName) selfDisplayName = name;
+          continue;
+        }
+        competitorCounts[name] = (competitorCounts[name] || 0) + 1;
       }
     }
   }
 
-  return Object.entries(brandCounts)
+  const competitors = Object.entries(competitorCounts)
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count);
+
+  const brand = selfCount > 0 && selfDisplayName
+    ? { name: selfDisplayName, count: selfCount }
+    : null;
+
+  return { brand, competitors };
 }
