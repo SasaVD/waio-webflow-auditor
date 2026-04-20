@@ -19,7 +19,7 @@ _BOT_PROTECTION_PATTERNS = [
     "enable javascript and cookies",
 ]
 
-_MIN_WORDS_AFTER_FILTER = 300
+_MIN_WORDS_AFTER_FILTER = 200
 
 
 def _is_bot_protection_page(text: str) -> str | None:
@@ -204,4 +204,9 @@ async def extract_content_from_urls(
     logger.info(
         f"Content extraction: {successful}/{len(urls)} URLs extracted successfully"
     )
+    for r in results:
+        if not r["success"]:
+            logger.info(
+                f"Extraction failed: {r['url']} — {r.get('error') or 'unknown'}"
+            )
     return list(results)

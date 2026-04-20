@@ -3,6 +3,7 @@ import hashlib
 import logging
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from .serp_fetcher import fetch_serp_results
 from .content_extractor import extract_content_from_urls
@@ -53,10 +54,26 @@ async def run_content_optimization(
         # Take the top N successful extractions (highest SERP position first)
         competitor_texts = [e["text"] for e in successful[:num_competitors]]
 
-        if len(competitor_texts) < 3:
+        if len(competitor_texts) < 2:
+            failure_details = []
+            for e in competitor_extractions:
+                if not e["success"]:
+                    host = urlparse(e["url"]).netloc or e["url"]
+                    reason = (e.get("error") or "extraction failed").rstrip(".")
+                    failure_details.append(f"{host} ({reason})")
+            if not competitor_urls:
+                detail = "SERP returned no competitor URLs for this keyword"
+            elif failure_details:
+                detail = "Failed to extract: " + "; ".join(failure_details[:6])
+                if len(failure_details) > 6:
+                    detail += f" — and {len(failure_details) - 6} more"
+            else:
+                detail = "no competitor content available"
             raise ValueError(
-                f"Only {len(competitor_texts)} competitor pages could be extracted. "
-                f"Need at least 3 for meaningful analysis."
+                f"Only {len(competitor_texts)} competitor page(s) extracted from "
+                f"{len(competitor_urls)} SERP result(s); need at least 2. {detail}. "
+                f"Try a more specific keyword (e.g. add a modifier like 'services' "
+                f"or the target industry)."
             )
 
         # Step 3: Compute WDF*IDF
