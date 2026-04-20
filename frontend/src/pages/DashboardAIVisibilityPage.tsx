@@ -88,8 +88,8 @@ export default function DashboardAIVisibilityPage() {
     );
   }
 
-  // Failed without data
-  if (!data) {
+  // Failed — either no data at all, or data without the core result shape
+  if (!data || !data.mentions_database || !data.live_test) {
     return (
       <div className="p-6 lg:p-8 max-w-4xl mx-auto">
         <div className="text-center py-16">

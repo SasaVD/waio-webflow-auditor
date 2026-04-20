@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { motion } from 'framer-motion';
-import { Eye, ChevronRight, Loader2, Target } from 'lucide-react';
+import { Eye, ChevronRight, Loader2, Target, AlertCircle } from 'lucide-react';
 import { useAIVisibilityStore } from '../../stores/aiVisibilityStore';
 import { AIVisibilityModal } from './AIVisibilityModal';
 
@@ -84,12 +84,48 @@ export function AIVisibilityKpiCard({ auditId }: AIVisibilityKpiCardProps) {
     );
   }
 
+  // Failed — analysis errored out, data shape is incomplete (no mentions_database / live_test)
+  if (status === 'failed' || !data?.mentions_database || !data?.live_test) {
+    return (
+      <>
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.26 }}
+        >
+          <button
+            onClick={() => setModalOpen(true)}
+            className="w-full text-left bg-surface-raised border border-amber-500/30 rounded-xl p-5 hover:border-amber-500/50 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
+                  <AlertCircle size={18} className="text-amber-400" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-text">AI Visibility</h2>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    Last run failed.{' '}
+                    <span className="text-amber-400 font-semibold">Retry →</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </button>
+        </motion.div>
+        <AIVisibilityModal
+          auditId={auditId}
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+        />
+      </>
+    );
+  }
+
   // Has data — determine which variant to show
-  const hasMentions = data && data.mentions_database.total > 0;
-  const engineCount = data ? Object.keys(data.live_test.engines).length : 0;
-  const okEngines = data
-    ? Object.values(data.live_test.engines).filter((e) => e.status === 'ok').length
-    : 0;
+  const hasMentions = data.mentions_database.total > 0;
+  const engineCount = Object.keys(data.live_test.engines).length;
+  const okEngines = Object.values(data.live_test.engines).filter((e) => e.status === 'ok').length;
 
   // Computed with data
   return (
