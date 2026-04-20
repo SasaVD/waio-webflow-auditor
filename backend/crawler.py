@@ -87,7 +87,16 @@ async def fetch_page_with_playwright(url: str) -> str:
     html_content = ""
     try:
         page = await context.new_page()
-        await page.goto(url, wait_until="networkidle", timeout=15000)
+        # Use domcontentloaded + longer timeout: networkidle hangs on any site
+        # with persistent analytics/sockets, and Cloudflare JS challenges need
+        # time to clear. After DOM is parsed, opportunistically wait for full
+        # load (for JS hydration / challenge redirect) but don't fail if it
+        # times out — a parsed DOM is enough to audit.
+        await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        try:
+            await page.wait_for_load_state("load", timeout=10000)
+        except Exception as load_err:
+            logger.info(f"Playwright load state not reached for {url} ({load_err}); proceeding with DOM snapshot")
         html_content = await page.content()
     except Exception as e:
         logger.error(f"Playwright attempt failed for {url}: {e}")
