@@ -20,6 +20,7 @@ Cost per 2,000-page audit (selective strategy):
 import asyncio
 import logging
 import os
+import re
 from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List
 
@@ -230,8 +231,38 @@ async def classify_pages_batch(
 # ── Entity Analysis (Sprint 4D, v1 API) ──────────────────────────
 
 
+_TERMINAL = re.compile(r"[.!?:;]\s*$")
+
+
 def _prepare_text(text: str) -> str:
-    """Truncate text for NLP API (max ~990KB)."""
+    """Normalize and truncate text for the NLP API (max ~990KB).
+
+    BUG-2 fix: Trafilatura preserves heading/paragraph structure via
+    newlines but leaves headings (and some list items) unpunctuated.
+    Google NLP's PLAIN_TEXT tokenizer doesn't treat a bare \\n as a
+    sentence boundary when the preceding line ends without terminal
+    punctuation. On shadowdigital.cc this caused the homepage's
+    heading "About Webflow" to merge with the next paragraph
+    ("Webflow is a no-code development tool...") and emit the
+    stuttering entity "Webflow Webflow" at 0.368 salience, which then
+    surfaced as "webflow services for webflow" in AI Visibility
+    prompts, as a SEMANTIC term classification for the Content
+    Optimizer, and as "Double down on Webflow Webflow" copy in the
+    executive summary.
+
+    Fixing at the boundary: append a period to any non-blank line
+    that doesn't already end in terminal punctuation. Block
+    boundaries become sentence boundaries without changing meaning.
+    nlp_sanitizer.py stays in place as defense in depth for any
+    other upstream quirks.
+    """
+    lines = []
+    for line in text.splitlines():
+        stripped = line.rstrip()
+        if stripped and not _TERMINAL.search(stripped):
+            stripped += "."
+        lines.append(stripped)
+    text = "\n".join(lines)
     if len(text.encode("utf-8")) > 990_000:
         text = text[:250_000]
     return text
