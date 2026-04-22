@@ -23,7 +23,7 @@ import re
 import json
 from typing import Dict, Any, List, Set
 from collections import Counter
-from utils import truncate_html, get_css_selector
+from utils import make_element_entry
 
 
 def run_data_integrity_audit(soup: BeautifulSoup, html_content: str) -> Dict[str, Any]:
@@ -167,18 +167,18 @@ def check_price_conflicts(soup: BeautifulSoup, html_content: str) -> Dict[str, A
             "https://schema.org/priceCurrency",
             "An AI agent asked about pricing will be confused by mixed currencies and may provide incorrect price comparisons to users."
         )
-        # Find elements containing price text
+        # Find elements containing price text. QW2: use make_element_entry
+        # for the same {selector, html_snippet, location} shape the other
+        # pillars emit — gains get_element_location's smart context
+        # detection ("footer section", "main content, section: Pricing")
+        # instead of the old hardcoded "page content". See Phase 1 audit.
         price_els = []
         if body:
             currency_re = re.compile(r'[\$€£][\d,]+(?:\.\d{2})?|\d+\s*(?:USD|EUR|GBP|CAD|AUD)')
             for el in body.find_all(string=currency_re):
                 parent = el.parent
                 if parent and parent.name not in ('script', 'style'):
-                    price_els.append({
-                        "selector": get_css_selector(parent),
-                        "html_snippet": truncate_html(str(parent)),
-                        "location": "page content",
-                    })
+                    price_els.append(make_element_entry(parent))
                     if len(price_els) >= 5:
                         break
         if price_els:
@@ -293,16 +293,13 @@ def check_contact_conflicts(soup: BeautifulSoup, html_content: str) -> Dict[str,
             "https://schema.org/telephone",
             "An AI agent asked 'What is the phone number?' will not know which number to provide if multiple unlabeled numbers exist."
         )
+        # QW2: same shape swap as the price check above.
         phone_els = []
         if body:
             for el in body.find_all(string=phone_pattern):
                 parent = el.parent
                 if parent and parent.name not in ('script', 'style'):
-                    phone_els.append({
-                        "selector": get_css_selector(parent),
-                        "html_snippet": truncate_html(str(parent)),
-                        "location": "page content",
-                    })
+                    phone_els.append(make_element_entry(parent))
                     if len(phone_els) >= 5:
                         break
         if phone_els:
