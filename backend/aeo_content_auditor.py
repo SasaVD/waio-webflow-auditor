@@ -251,7 +251,12 @@ def check_section_length(soup: BeautifulSoup) -> Dict[str, Any]:
         }
 
     section_word_counts = []
-    for i, heading in enumerate(headings):
+    # QW1: track (heading, word_count) for sections that sit outside the
+    # optimal 100-200 range so the finding can carry drill-down context.
+    # Previously the headings were enumerated but discarded once their
+    # word count was pushed onto section_word_counts. See Phase 1 audit.
+    offender_sections: List[tuple[Tag, int]] = []
+    for heading in headings:
         section_text = ""
         sibling = heading.find_next_sibling()
         while sibling and not (sibling.name and re.match(r'^h[1-6]$', sibling.name)):
@@ -259,6 +264,8 @@ def check_section_length(soup: BeautifulSoup) -> Dict[str, Any]:
             sibling = sibling.find_next_sibling()
         word_count = len(section_text.split())
         section_word_counts.append(word_count)
+        if word_count < 50 or word_count > 300:
+            offender_sections.append((heading, word_count))
 
     if not section_word_counts:
         return {"status": "info", "findings": []}
@@ -291,6 +298,21 @@ def check_section_length(soup: BeautifulSoup) -> Dict[str, Any]:
             "positive_message": f"Average section length is {avg_words} words, within the optimal range for AI content consumption.",
             "findings": []
         }
+
+    # QW1: attach the worst-offender section headings (top 5, sorted by
+    # distance from the 100-200 target band) so the drill-down view can
+    # point the user at the specific sections driving the average out of
+    # range — not just the aggregate number.
+    if offender_sections:
+        offender_sections.sort(
+            key=lambda pair: (
+                abs(pair[1] - 100) if pair[1] < 100 else abs(pair[1] - 200)
+            ),
+            reverse=True,
+        )
+        findings[0]["elements"] = [
+            make_element_entry(h) for h, _ in offender_sections[:5]
+        ]
 
     return {
         "status": "fail",
