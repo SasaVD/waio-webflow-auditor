@@ -304,7 +304,7 @@ export function generateExcel(report: Record<string, any>): void {
         { wch: 50 }, { wch: 14 }, { wch: 14 }, { wch: 10 },
         { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 20 },
       ];
-      XLSX.utils.book_append_sheet(wb, tiprPageSheet, 'TIPR Scores');
+      XLSX.utils.book_append_sheet(wb, tiprPageSheet, 'TIPR Ranks');
     }
 
     // Recommendations

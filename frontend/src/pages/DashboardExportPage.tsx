@@ -350,7 +350,7 @@ export default function DashboardExportPage() {
               <div>
                 <div className="text-sm font-semibold text-text">Link Intelligence Data</div>
                 <div className="text-xs text-text-muted mt-0.5 max-w-md">
-                  Complete internal link data with TIPR scores, recommendations, and edge lists.
+                  Complete internal link data with TIPR ranks, recommendations, and edge lists.
                   Compatible with Google Sheets, Excel, and graph analysis tools like Gephi.
                 </div>
               </div>

@@ -2062,10 +2062,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <h3>Top 10 Pages by TIPR Score</h3>
+    <h3>Top 10 Pages by TIPR Rank</h3>
     <table>
       <thead>
-        <tr><th>URL</th><th>Class</th><th style="text-align:right;">Inbound</th><th style="text-align:right;">Outbound</th><th style="text-align:right;">Score</th></tr>
+        <tr><th>URL</th><th>Class</th><th style="text-align:right;">Inbound</th><th style="text-align:right;">Outbound</th><th style="text-align:right;">Rank</th></tr>
       </thead>
       <tbody>
         {% for p in tipr.top_pages %}
