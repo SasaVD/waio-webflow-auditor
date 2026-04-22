@@ -1,10 +1,52 @@
 import asyncio
 import logging
+import re
 from typing import Dict, Any, List
 from playwright.async_api import Browser, Page
 from axe_playwright_python.async_playwright import Axe
 from crawler import get_browser
 from utils import truncate_html
+
+
+# QW4: Accessibility axe-scan findings emit element drill-down, but axe's
+# output shape is a CSS selector path array + HTML snippet string — we can't
+# feed that into utils.make_element_entry() because there's no live Tag with
+# parent context. This adapter produces the same {selector, html_snippet,
+# location} dict that every other pillar emits, so downstream rendering
+# (dashboard findings view, PDF Priority Action Items) can treat axe
+# drill-downs identically to all other pillars' drill-downs.
+_LANDMARK_PREFIX_RE = re.compile(
+    r"^\s*(header|footer|main|nav|aside)\b", re.IGNORECASE
+)
+
+
+def _axe_location_from_selector(selector: str) -> str:
+    """Infer a landmark-based location string from an axe CSS selector path.
+
+    Matches the output strings of utils.get_element_location() so drill-down
+    renderers can render axe elements with no special-case handling.
+    """
+    m = _LANDMARK_PREFIX_RE.match(selector or "")
+    if not m:
+        return "page content"
+    tag = m.group(1).lower()
+    if tag == "nav":
+        return "navigation section"
+    if tag == "main":
+        return "main content"
+    return f"{tag} section"
+
+
+def _axe_node_to_element_entry(node: Any) -> Dict[str, str]:
+    """Convert an axe-core violation node to the shared element-entry shape."""
+    target = node.get("target", []) if isinstance(node, dict) else getattr(node, "target", [])
+    html = node.get("html", "") if isinstance(node, dict) else getattr(node, "html", "")
+    selector = ", ".join(target) if isinstance(target, list) else str(target)
+    return {
+        "selector": selector,
+        "html_snippet": truncate_html(str(html)),
+        "location": _axe_location_from_selector(selector),
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -123,17 +165,11 @@ async def check_axe_scan(page: Page) -> Dict[str, Any]:
             help_url
         )
 
-        # Extract element data from axe-core nodes
-        elements = []
-        for node in nodes[:5]:
-            n_target = node.get('target', []) if isinstance(node, dict) else getattr(node, 'target', [])
-            n_html = node.get('html', '') if isinstance(node, dict) else getattr(node, 'html', '')
-            selector = ', '.join(n_target) if isinstance(n_target, list) else str(n_target)
-            elements.append({
-                "selector": selector,
-                "html_snippet": truncate_html(str(n_html)),
-                "location": "page content",
-            })
+        # QW4: use the shared _axe_node_to_element_entry adapter so the
+        # shape matches every other pillar's drill-down rows. Previously
+        # this was an inline dict with location hardcoded to "page content";
+        # the adapter infers landmark context from the selector prefix.
+        elements = [_axe_node_to_element_entry(node) for node in nodes[:5]]
         if elements:
             f["elements"] = elements
 
