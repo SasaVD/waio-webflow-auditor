@@ -1486,13 +1486,27 @@ def prepare_pages_from_report(report: Dict[str, Any]) -> Tuple[
     tipr_pages = (report.get("tipr_analysis") or {}).get("pages", [])
     tipr_map = {p["url"]: p for p in tipr_pages if isinstance(p, dict)}
 
-    # NLP data — homepage entities from nlp_analysis
+    # NLP data — homepage entities from nlp_analysis. Sanitize at this
+    # boundary (BUG-3): entities feed the 0.40-weighted entity vector in
+    # the hybrid feature matrix, so stuttering "Webflow Webflow" or
+    # industry-duplicate names would distort cluster assignment.
+    from nlp_sanitizer import sanitize_entity_dicts
     nlp = report.get("nlp_analysis") or {}
+    detected_industry = nlp.get("detected_industry")
     homepage_url = report.get("url", "")
-    homepage_entities = nlp.get("entities", [])
+    homepage_entities = sanitize_entity_dicts(
+        nlp.get("entities", []), detected_industry
+    )
 
-    # Multi-page entity data (from enrichment step)
-    page_entities = report.get("page_entities") or {}
+    # Multi-page entity data (from enrichment step) — sanitize each
+    # page's entity list too.
+    raw_page_entities = report.get("page_entities") or {}
+    page_entities: Dict[str, Any] = {}
+    for _url, _pe in raw_page_entities.items():
+        if not isinstance(_pe, dict):
+            continue
+        cleaned = sanitize_entity_dicts(_pe.get("entities") or [], detected_industry)
+        page_entities[_url] = {**_pe, "entities": cleaned}
 
     # Build pages list
     pages = []

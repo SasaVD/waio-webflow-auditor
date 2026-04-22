@@ -50,9 +50,16 @@ async def run_ai_visibility_analysis(
             logger.error(f"AI Visibility: audit {audit_id} not found")
             return
 
+        from nlp_sanitizer import sanitize_entity_dicts, sanitize_entity_name
+
         report = audit.get("report_json") or {}
         nlp_data = report.get("nlp_analysis") or {}
-        nlp_entities = nlp_data.get("entities") or []
+        detected_industry_raw = nlp_data.get("detected_industry")
+        # Defense-in-depth: sanitize before brand_resolver or build_prompts
+        # see the stuttering "Webflow Webflow" artifact (BUG-3).
+        nlp_entities = sanitize_entity_dicts(
+            nlp_data.get("entities") or [], detected_industry_raw
+        )
 
         # Check for existing override in DB
         # The brand_override param takes precedence (from recompute request),
@@ -87,8 +94,13 @@ async def run_ai_visibility_analysis(
         )
 
         # Stage 3: Build prompts
-        detected_industry = nlp_data.get("detected_industry")
-        top_entity = nlp_data.get("primary_entity")
+        detected_industry = detected_industry_raw
+        # sanitize_entity_name returns None if the top_entity is pure
+        # adjacent-token repetition or duplicates the industry leaf —
+        # build_prompts already treats None as "fall back to industry leaf".
+        top_entity = sanitize_entity_name(
+            nlp_data.get("primary_entity"), detected_industry
+        )
         prompts = build_prompts(detected_industry, top_entity, brand_info.name)
 
         # Stage 4-6: DataForSEO calls

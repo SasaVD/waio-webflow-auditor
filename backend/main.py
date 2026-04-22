@@ -2851,10 +2851,17 @@ async def run_content_optimizer(audit_id: str, body: dict = Body(...)):
             detail="Could not extract enough content from the target URL (minimum 30 words)",
         )
 
-    # Get NLP entities for better term classification
+    # Get NLP entities for better term classification. Defense-in-depth
+    # sanitation here (BUG-3): the upstream NLP pipeline sometimes emits
+    # stuttering entity names ("Webflow Webflow") and industry-duplicate
+    # entries; those would otherwise get classified SEMANTIC incorrectly.
+    from nlp_sanitizer import sanitize_entity_dicts
     top_entities = None
     nlp_data = report.get("nlp_analysis") or {}
-    entities = nlp_data.get("entities") or []
+    detected_industry = nlp_data.get("detected_industry")
+    entities = sanitize_entity_dicts(
+        nlp_data.get("entities") or [], detected_industry
+    )
     if entities:
         top_entities = [e["name"] for e in entities[:20] if isinstance(e, dict) and e.get("name")]
 

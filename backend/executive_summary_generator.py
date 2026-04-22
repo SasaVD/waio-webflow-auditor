@@ -1620,9 +1620,14 @@ def _section_opportunities(report: dict, scores: Dict[str, int]) -> str:
             "the technical foundation for AI readiness is partially in place"
         )
 
-    # NLP entity strength
+    # NLP entity strength — sanitize at boundary (BUG-3) so stuttering
+    # emissions like "Webflow Webflow" or industry-duplicate names can't
+    # reach the "Double down on X" opportunity copy.
     if nlp and nlp.get("entities"):
-        entities = nlp["entities"]
+        from nlp_sanitizer import sanitize_entity_dicts
+        entities = sanitize_entity_dicts(
+            nlp["entities"], nlp.get("detected_industry")
+        )
         top_entity = entities[0] if entities else None
         if top_entity and top_entity.get("salience", 0) > 0.3:
             opps.append(
