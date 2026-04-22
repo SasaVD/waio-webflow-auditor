@@ -999,6 +999,20 @@ async def recompute_pillar(audit_id: str, pillar_key: str):
                     existing.append(str(p))
             report["positive_findings"] = existing
 
+    # Regenerate the executive summary if one already exists. The old
+    # summary was written when the pillar was in its pre-retry state and
+    # may cite the failed scan's error text ("Site Structure: Failed to
+    # run complete accessibility scan..."). The new-code generator skips
+    # failed-pillar findings, so regenerating here cleans up that
+    # dangling Supporting Detail with the same single call.
+    if report.get("executive_summary"):
+        try:
+            report["executive_summary"] = generate_executive_summary(
+                report, report.get("competitive_data")
+            )
+        except Exception as e:
+            logger.warning(f"Exec-summary regeneration skipped on retry: {e}")
+
     # Persist. coverage_weight needs its own column; overall_score may be None
     # now (Option C) so the normalized tables' integer column must allow NULL.
     import db_postgres as _db_pg
