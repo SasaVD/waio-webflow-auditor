@@ -159,7 +159,7 @@ async def get_single_page_audit(job_id: str, url: str) -> Optional[Dict[str, Any
 async def save_audit_history(
     url: str,
     audit_type: str,
-    overall_score: int,
+    overall_score: Optional[int],
     overall_label: str,
     report: dict,
     tier: str = "free",
@@ -168,10 +168,14 @@ async def save_audit_history(
     pool = await get_pool()
     if audit_id is None:
         audit_id = uuid.uuid4()
+    # BUG-1: overall_score may be None when covered_weight < 0.70. coverage_weight
+    # is always written so the UI can render a disclosure chip even when the
+    # overall score is suppressed.
+    coverage_weight = report.get("coverage_weight", 1.0)
     async with pool.acquire() as conn:
         await conn.execute(
-            """INSERT INTO audits (id, url, tier, audit_type, overall_score, overall_label, report_json, created_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+            """INSERT INTO audits (id, url, tier, audit_type, overall_score, overall_label, report_json, created_at, coverage_weight)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)""",
             audit_id,
             url,
             tier,
@@ -180,6 +184,7 @@ async def save_audit_history(
             overall_label,
             json.dumps(report),
             datetime.now(timezone.utc),
+            coverage_weight,
         )
         # Sprint 1C: decompose into normalized tables
         await _save_normalized_data(conn, audit_id, report)
@@ -216,13 +221,14 @@ async def _save_normalized_data(conn, audit_id: uuid.UUID, report: dict):
         label = pillar_data.get("label", "N/A")
         pillar_findings = pillar_data.get("findings", [])
         finding_count = len(pillar_findings)
+        scan_status = pillar_data.get("scan_status", "ok")
 
         await conn.execute(
-            """INSERT INTO pillar_scores (audit_id, pillar_key, score, label, finding_count)
-               VALUES ($1, $2, $3, $4, $5)
+            """INSERT INTO pillar_scores (audit_id, pillar_key, score, label, finding_count, scan_status)
+               VALUES ($1, $2, $3, $4, $5, $6)
                ON CONFLICT (audit_id, pillar_key) DO UPDATE
-               SET score = $3, label = $4, finding_count = $5""",
-            audit_id, pillar_key, score, label, finding_count,
+               SET score = $3, label = $4, finding_count = $5, scan_status = $6""",
+            audit_id, pillar_key, score, label, finding_count, scan_status,
         )
 
         for finding in pillar_findings:

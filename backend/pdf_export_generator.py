@@ -203,7 +203,14 @@ def _render_pillar_bar_chart_svg(pillar_groups: list[dict]) -> str:
 
     svg_parts = [
         f'<svg width="100%" viewBox="0 0 {total_w} {total_h}" xmlns="http://www.w3.org/2000/svg" '
-        'font-family="Inter, system-ui, sans-serif">'
+        'font-family="Inter, system-ui, sans-serif">',
+        # BUG-1: diagonal-stripe pattern used to mark failed pillars so they
+        # read as "no data" not "score of 0".
+        '<defs><pattern id="failedPillarPattern" width="6" height="6" '
+        'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
+        '<rect width="6" height="6" fill="#F1F5F9"/>'
+        '<line x1="0" y1="0" x2="0" y2="6" stroke="#CBD5E1" stroke-width="2"/>'
+        '</pattern></defs>',
     ]
     # Light vertical gridlines at 25/50/75/100
     for pct in (25, 50, 75, 100):
@@ -219,11 +226,15 @@ def _render_pillar_bar_chart_svg(pillar_groups: list[dict]) -> str:
 
     for i, p in enumerate(rows):
         y = top_pad + i * row_h
+        scan_status = p.get("scan_status") or "ok"
         score = int(p.get("score") or 0)
         color = p.get("color") or _score_color(score)
         label = p.get("label") or ""
         weight = p.get("weight") or 0
-        bar_length = max(0.0, min(1.0, score / 100)) * bar_w
+        # BUG-1: failed pillars render the track only (no fill, no score) and
+        # a "Scan incomplete" caption where the score number would go. Avoids
+        # the fabricated-score visual that made axe failures look like 90/100.
+        bar_length = 0.0 if scan_status != "ok" else max(0.0, min(1.0, score / 100)) * bar_w
 
         # Pillar name label
         svg_parts.append(
@@ -240,18 +251,32 @@ def _render_pillar_bar_chart_svg(pillar_groups: list[dict]) -> str:
             f'<rect x="{bar_left}" y="{y + 6}" width="{bar_w}" height="14" '
             'rx="3" ry="3" fill="#F1F5F9"/>'
         )
-        # Fill
-        svg_parts.append(
-            f'<rect x="{bar_left}" y="{y + 6}" width="{bar_length:.1f}" height="14" '
-            f'rx="3" ry="3" fill="{color}"/>'
-        )
-        # Score number to the right of the bar
-        svg_parts.append(
-            f'<text x="{bar_left + bar_w + 8}" y="{y + 18}" '
-            f'font-size="12" font-weight="700" fill="{color}">{score}</text>'
-        )
+        if scan_status != "ok":
+            # Diagonal-stripe pattern to visually disambiguate "no data" from
+            # a legitimate score of 0.
+            svg_parts.append(
+                f'<rect x="{bar_left}" y="{y + 6}" width="{bar_w}" height="14" '
+                'rx="3" ry="3" fill="url(#failedPillarPattern)" opacity="0.4"/>'
+            )
+            svg_parts.append(
+                f'<text x="{bar_left + bar_w + 8}" y="{y + 18}" '
+                f'font-size="10" font-style="italic" fill="#94A3B8">Scan incomplete</text>'
+            )
+            # Consume findings_count so the subsequent block doesn't render it.
+            findings_count = 0
+        else:
+            # Fill
+            svg_parts.append(
+                f'<rect x="{bar_left}" y="{y + 6}" width="{bar_length:.1f}" height="14" '
+                f'rx="3" ry="3" fill="{color}"/>'
+            )
+            # Score number to the right of the bar
+            svg_parts.append(
+                f'<text x="{bar_left + bar_w + 8}" y="{y + 18}" '
+                f'font-size="12" font-weight="700" fill="{color}">{score}</text>'
+            )
+            findings_count = int(p.get("findings_count") or 0)
         # Findings count suffix (e.g., "· 8 findings")
-        findings_count = int(p.get("findings_count") or 0)
         if findings_count:
             findings_text = f"· {findings_count} finding{'s' if findings_count != 1 else ''}"
             svg_parts.append(
@@ -417,8 +442,15 @@ def markdown_to_html(md: str) -> str:
 
 def _build_cover(report: dict) -> dict:
     url = report.get("url") or report.get("primary_url") or ""
-    overall_score = report.get("overall_score") or 0
-    overall_label = report.get("overall_label") or "Unscored"
+    raw_score = report.get("overall_score")
+    # BUG-1: when coverage < 0.70 overall_score is None. The branded PDF
+    # previously coerced None → 0 via `or 0` and rendered a bright-red 0
+    # ring, which read as "your site scored 0" rather than "we couldn't
+    # compute a score". Show a placeholder ring + Scan Incomplete label.
+    score_suppressed = raw_score is None
+    overall_score = 0 if score_suppressed else int(raw_score)
+    overall_label = "Scan Incomplete" if score_suppressed else (report.get("overall_label") or "Unscored")
+    coverage_weight = report.get("coverage_weight", 1.0)
     cms = (
         report.get("detected_cms")
         or report.get("cms_detection", {}).get("platform")
@@ -437,12 +469,25 @@ def _build_cover(report: dict) -> dict:
     except Exception:
         ts = datetime.utcnow().strftime("%B %d, %Y")
 
+    coverage_pct = int(round(coverage_weight * 100))
+    coverage_disclosure = None
+    if coverage_weight < 1.0:
+        coverage_disclosure = (
+            f"Partial scan: {coverage_pct}% pillar coverage. "
+            "Failed pillars are excluded from the overall score."
+        )
+
     return {
         "url": url,
         "domain": _domain(url),
         "overall_score": overall_score,
+        "overall_score_display": "—" if score_suppressed else str(overall_score),
+        "score_suppressed": score_suppressed,
         "overall_label": overall_label,
-        "overall_color": _score_color(overall_score),
+        "overall_color": "#94A3B8" if score_suppressed else _score_color(overall_score),
+        "coverage_weight": coverage_weight,
+        "coverage_pct": coverage_pct,
+        "coverage_disclosure": coverage_disclosure,
         "cms": cms,
         "tier": tier,
         "timestamp": ts,
@@ -472,15 +517,29 @@ def _build_pillars(report: dict) -> list[dict]:
                         nested = ck_val.get("findings")
                         if isinstance(nested, list):
                             findings_count += len(nested)
+            scan_status = cat.get("scan_status", "ok")
+            # BUG-1: failed pillars render as "Scan incomplete" instead of
+            # showing a fabricated score. Templates should check scan_status
+            # before rendering score_int or label_text.
+            if scan_status != "ok":
+                display_label = "Scan incomplete"
+                display_color = "#94A3B8"  # slate-400, muted
+                display_score_text = "—"
+            else:
+                display_label = cat.get("label") or "Not scored"
+                display_color = _score_color(score_int)
+                display_score_text = str(score_int)
             pillar_cards.append({
                 "key": key,
                 "label": label,
                 "weight": weight,
                 "score": score_int,
-                "label_text": cat.get("label") or "Not scored",
-                "color": _score_color(score_int),
+                "score_display": display_score_text,
+                "scan_status": scan_status,
+                "label_text": display_label,
+                "color": display_color,
                 "initial": label[:1],
-                "findings_count": findings_count,
+                "findings_count": findings_count if scan_status == "ok" else 0,
             })
         result.append({
             "name": group["name"],
@@ -1879,6 +1938,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <div class="eyebrow-plain">Overall Audit Score</div>
         <div class="big">{{ cover.overall_label }}</div>
         <div class="small muted" style="margin-top: 6pt;">10 deterministic pillars · evidence-based scoring</div>
+        {% if cover.coverage_disclosure %}
+          <div class="small" style="margin-top: 8pt; padding: 6pt 10pt; background: #FEF3C7; color: #92400E; border-radius: 4pt; font-weight: 600;">
+            {{ cover.coverage_disclosure }}
+          </div>
+        {% endif %}
       </div>
     </div>
   </div>

@@ -1,5 +1,27 @@
 from typing import Dict, Any, Optional
 
+# Canonical weights per pillar. MUST sum to 1.0.
+# When a pillar scan fails we drop its weight and renormalize over the covered
+# pillars (Option A). See compile_scores() for the full coverage model.
+PILLAR_WEIGHTS: Dict[str, float] = {
+    "semantic_html": 0.12,
+    "structured_data": 0.12,
+    "aeo_content": 0.10,
+    "css_quality": 0.05,
+    "js_bloat": 0.05,
+    "accessibility": 0.18,
+    "rag_readiness": 0.10,
+    "agentic_protocols": 0.08,
+    "data_integrity": 0.08,
+    "internal_linking": 0.12,
+}
+
+# If fewer than this fraction of weighted pillars scanned successfully, suppress
+# the overall score entirely rather than renormalize over a non-representative
+# subset. Option A above; Option C (suppress) below.
+MIN_COVERAGE_FOR_SCORE = 0.70
+
+
 def calculate_score(findings: list[Dict[str, Any]]) -> int:
     score = 100.0
     
@@ -68,40 +90,82 @@ def compile_scores(
     
     css_keys = ["framework_detection", "naming_consistency", "inline_styles", "external_stylesheets", "render_blocking"]
     js_keys = ["webflow_js_bloat", "third_party_scripts", "total_scripts"]
-    
+
+    css_js_checks = css_js_res.get("checks", {}) or {}
     for k in css_keys:
-        if "findings" in css_js_res["checks"][k]:
-            css_findings.extend(css_js_res["checks"][k]["findings"])
-            
+        check = css_js_checks.get(k) or {}
+        if "findings" in check:
+            css_findings.extend(check["findings"])
+
     for k in js_keys:
-        if "findings" in css_js_res["checks"][k]:
-            js_findings.extend(css_js_res["checks"][k]["findings"])
+        check = css_js_checks.get(k) or {}
+        if "findings" in check:
+            js_findings.extend(check["findings"])
             
     css_score = calculate_score(css_findings)
     js_score = calculate_score(js_findings)
-    
-    overall = (html_score * 0.12) + (sd_score * 0.12) + (aeo_score * 0.10) + (css_score * 0.05) + (js_score * 0.05) + (a11y_score * 0.18) + (rag_score * 0.10) + (agent_score * 0.08) + (data_score * 0.08) + (il_score * 0.12)
-    overall = int(round(overall))
-    
+
+    # css_quality and js_bloat both come from css_js_res; if that scan fails,
+    # both sub-pillars fail together.
+    css_js_status = css_js_res.get("scan_status", "ok")
+
+    scan_statuses: Dict[str, str] = {
+        "semantic_html": html_res.get("scan_status", "ok"),
+        "structured_data": sd_res.get("scan_status", "ok"),
+        "aeo_content": aeo_res.get("scan_status", "ok"),
+        "css_quality": css_js_status,
+        "js_bloat": css_js_status,
+        "accessibility": a11y_res.get("scan_status", "ok"),
+        "rag_readiness": rag_res.get("scan_status", "ok"),
+        "agentic_protocols": agent_res.get("scan_status", "ok"),
+        "data_integrity": data_res.get("scan_status", "ok"),
+        "internal_linking": internal_linking_res.get("scan_status", "ok"),
+    }
+
+    raw_scores: Dict[str, int] = {
+        "semantic_html": html_score,
+        "structured_data": sd_score,
+        "aeo_content": aeo_score,
+        "css_quality": css_score,
+        "js_bloat": js_score,
+        "accessibility": a11y_score,
+        "rag_readiness": rag_score,
+        "agentic_protocols": agent_score,
+        "data_integrity": data_score,
+        "internal_linking": il_score,
+    }
+
+    # Option A: weighted average over pillars that scanned successfully.
+    # covered_weight is summed from PILLAR_WEIGHTS, not pillar count — so
+    # Accessibility (18%) failing alone drops coverage to 82%, not 90%.
+    covered_weight = 0.0
+    weighted_sum = 0.0
+    for pillar, weight in PILLAR_WEIGHTS.items():
+        if scan_statuses.get(pillar, "ok") == "ok":
+            covered_weight += weight
+            weighted_sum += raw_scores[pillar] * weight
+
+    overall: Optional[int]
+    if covered_weight < MIN_COVERAGE_FOR_SCORE:
+        # Too little of the audit succeeded to produce a meaningful score.
+        # Surfaced as None so the UI can render "Score unavailable" instead of
+        # a misleadingly-high number derived from 2-3 pillars.
+        overall = None
+        overall_label = "Scan incomplete"
+    else:
+        overall = int(round(weighted_sum / covered_weight))
+        overall_label = get_label(overall)
+
     # Replace single css_js finding list with split if needed for report generator.
     css_js_res['css_score'] = css_score
     css_js_res['js_score'] = js_score
-    
+
     return {
         "overall_score": overall,
-        "overall_label": get_label(overall),
-        "scores": {
-            "semantic_html": html_score,
-            "structured_data": sd_score,
-            "aeo_content": aeo_score,
-            "css_quality": css_score,
-            "js_bloat": js_score,
-            "accessibility": a11y_score,
-            "rag_readiness": rag_score,
-            "agentic_protocols": agent_score,
-            "data_integrity": data_score,
-            "internal_linking": il_score
-        },
+        "overall_label": overall_label,
+        "coverage_weight": round(covered_weight, 4),
+        "scan_statuses": scan_statuses,
+        "scores": raw_scores,
         "labels": {
             "semantic_html": get_label(html_score),
             "structured_data": get_label(sd_score),

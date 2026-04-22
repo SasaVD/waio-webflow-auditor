@@ -250,9 +250,18 @@ def _is_infrastructure_failure(description: str) -> bool:
 
 
 def _collect_findings(report: dict) -> List[Dict[str, Any]]:
-    """Collect all findings from audit categories, sorted by severity."""
+    """Collect all findings from audit categories, sorted by severity.
+
+    Primary filter: skip pillars whose scan_status is not "ok". An
+    infrastructure failure produces scan_status, not findings — any finding
+    attached to a failed pillar is stale/bogus and must not reach the brief.
+    _is_infrastructure_failure string-matching is kept as a belt-and-braces
+    fallback for older audit records that pre-date the scan_status field.
+    """
     findings: List[Dict[str, Any]] = []
     for pillar_key, pillar_data in report.get("categories", {}).items():
+        if pillar_data.get("scan_status", "ok") != "ok":
+            continue
         checks = pillar_data.get("checks", {})
         for check_data in checks.values():
             if not isinstance(check_data, dict):
@@ -269,6 +278,8 @@ def _collect_findings(report: dict) -> List[Dict[str, Any]]:
 def _a11y_breakdown(report: dict) -> Dict[str, Any]:
     """Summarize accessibility findings into plain-English categories + count."""
     a11y = (report.get("categories") or {}).get("accessibility") or {}
+    if a11y.get("scan_status", "ok") != "ok":
+        return {"total": 0, "categories": [], "scan_status": "failed"}
     categories_hit: List[str] = []
     total = 0
     for chk in a11y.get("checks", {}).values():
@@ -1693,6 +1704,18 @@ def generate_executive_summary(
     Produces a single Markdown string with 8 sections. Sections are omitted
     when the underlying data doesn't exist (e.g., no TIPR enrichment yet).
     """
+    # If coverage collapsed below the floor, overall_score is None and the
+    # brief would be built from ~2-3 pillars of data. Suppress the whole
+    # document rather than emit misleading strategic claims.
+    if report.get("overall_score") is None:
+        coverage = report.get("coverage_weight")
+        pct = f"{int(round(coverage * 100))}%" if isinstance(coverage, (int, float)) else "under 70%"
+        return (
+            "## Executive Summary Unavailable\n\n"
+            f"The audit completed with only **{pct}** pillar coverage — too little data to produce a meaningful strategic brief. "
+            "Re-run the failed pillars from the dashboard and regenerate the summary once coverage exceeds 70%.\n"
+        )
+
     scores = _get_scores(report)
 
     sections: List[str] = []

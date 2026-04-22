@@ -145,6 +145,40 @@ class PageAuditRequest(BaseModel):
     url: str
     parent_audit_id: str | None = None
 
+def _failed_pillar_result(pillar_name: str, error: Exception) -> dict:
+    """Return an empty-but-valid auditor result with scan_status='failed'.
+
+    Pillar modules crash occasionally (Playwright cold start, network jitter,
+    malformed HTML). Crashing the whole audit means the user loses 9 pillars of
+    valid data over a transient blip in one. This wrapper lets compile_scores
+    drop the failed pillar's weight (coverage_weight renormalization) instead
+    of synthesizing a bogus score. No finding is synthesized — infrastructure
+    failures produce scan_status, not findings.
+    """
+    logger.warning("Pillar %s crashed: %s", pillar_name, error, exc_info=True)
+    return {
+        "checks": {},
+        "positive_findings": [],
+        "findings": [],
+        "scan_status": "failed",
+        "scan_error": f"{type(error).__name__}: {error}",
+    }
+
+
+def _safe_run_pillar(pillar_name: str, fn, *args, **kwargs) -> dict:
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        return _failed_pillar_result(pillar_name, e)
+
+
+async def _safe_run_pillar_async(pillar_name: str, coro_fn, *args, **kwargs) -> dict:
+    try:
+        return await coro_fn(*args, **kwargs)
+    except Exception as e:
+        return _failed_pillar_result(pillar_name, e)
+
+
 @app.on_event("startup")
 async def startup_event():
     await init_db()
@@ -187,33 +221,35 @@ async def perform_audit(request: AuditRequest):
     try:
         html_content, soup = await fetch_page(url)
 
-        # Run the 10 deterministic pillars (always, regardless of tier)
+        # Run the 10 deterministic pillars (always, regardless of tier).
+        # Each is wrapped so one pillar crashing doesn't lose the other nine —
+        # compile_scores drops failed pillars from the weighted average.
         logger.info(f"Running HTML audit for {url}")
-        html_res = run_html_audit(soup, html_content)
+        html_res = _safe_run_pillar("semantic_html", run_html_audit, soup, html_content)
 
         logger.info(f"Running Structured Data audit for {url}")
-        sd_res = run_structured_data_audit(html_content, url)
+        sd_res = _safe_run_pillar("structured_data", run_structured_data_audit, html_content, url)
 
         logger.info(f"Running CSS/JS audit for {url}")
-        css_js_res = run_css_js_audit(soup, html_content)
+        css_js_res = _safe_run_pillar("css_js", run_css_js_audit, soup, html_content)
 
         logger.info(f"Running AEO content audit for {url}")
-        aeo_res = run_aeo_content_audit(soup, html_content)
+        aeo_res = _safe_run_pillar("aeo_content", run_aeo_content_audit, soup, html_content)
 
         logger.info(f"Running RAG Readiness audit for {url}")
-        rag_res = run_rag_readiness_audit(soup, html_content)
+        rag_res = _safe_run_pillar("rag_readiness", run_rag_readiness_audit, soup, html_content)
 
         logger.info(f"Running Agentic Protocol audit for {url}")
-        agent_res = run_agentic_protocol_audit(soup, html_content, url)
+        agent_res = _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url)
 
         logger.info(f"Running Data Integrity audit for {url}")
-        data_res = run_data_integrity_audit(soup, html_content)
+        data_res = _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content)
 
         logger.info(f"Running Internal Linking audit for {url}")
-        il_res = run_internal_linking_audit(soup, html_content, str(request.url), site_data=None)
+        il_res = _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, str(request.url), site_data=None)
 
         logger.info(f"Running Accessibility audit for {url}")
-        a11y_res = await run_accessibility_audit(url)
+        a11y_res = await _safe_run_pillar_async("accessibility", run_accessibility_audit, url)
 
         logger.info("Compiling scores and report")
         scores = compile_scores(html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, il_res)
@@ -276,15 +312,16 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
         logger.info(f"Page fetched: {len(html_content)} bytes")
 
         # ── Phase 1: 10-pillar deterministic audit (always runs) ──
-        html_res = run_html_audit(soup, html_content)
-        sd_res = run_structured_data_audit(html_content, url)
-        css_js_res = run_css_js_audit(soup, html_content)
-        aeo_res = run_aeo_content_audit(soup, html_content)
-        rag_res = run_rag_readiness_audit(soup, html_content)
-        agent_res = run_agentic_protocol_audit(soup, html_content, url)
-        data_res = run_data_integrity_audit(soup, html_content)
-        il_res = run_internal_linking_audit(soup, html_content, url, site_data=None)
-        a11y_res = await run_accessibility_audit(url)
+        # Per-pillar exception isolation; see _safe_run_pillar docstring.
+        html_res = _safe_run_pillar("semantic_html", run_html_audit, soup, html_content)
+        sd_res = _safe_run_pillar("structured_data", run_structured_data_audit, html_content, url)
+        css_js_res = _safe_run_pillar("css_js", run_css_js_audit, soup, html_content)
+        aeo_res = _safe_run_pillar("aeo_content", run_aeo_content_audit, soup, html_content)
+        rag_res = _safe_run_pillar("rag_readiness", run_rag_readiness_audit, soup, html_content)
+        agent_res = _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url)
+        data_res = _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content)
+        il_res = _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, url, site_data=None)
+        a11y_res = await _safe_run_pillar_async("accessibility", run_accessibility_audit, url)
 
         scores = compile_scores(html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, il_res)
         report = generate_report(url, html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, scores, il_res, tier="premium")
@@ -808,6 +845,218 @@ async def recompute_summary(audit_id: str):
     }
 
 
+@app.post("/api/audit/{audit_id}/recompute-pillar/{pillar_key}")
+async def recompute_pillar(audit_id: str, pillar_key: str):
+    """Re-run a single pillar scan for an existing audit.
+
+    Intended for transient failures (Playwright cold-start timeouts on
+    accessibility, upstream parser blips). Re-fetches the page, re-runs the
+    one pillar, splices the new result into the stored report, and
+    recomputes coverage_weight + overall_score using the canonical
+    PILLAR_WEIGHTS renormalization. Positives/findings from the other 9
+    pillars are preserved as-is (they already succeeded)."""
+    from scoring import PILLAR_WEIGHTS, MIN_COVERAGE_FOR_SCORE, calculate_score, get_label
+
+    record = await get_audit_by_id(audit_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    report = record["report_json"]
+    if isinstance(report, str):
+        report = json.loads(report)
+
+    categories = report.get("categories") or {}
+    if pillar_key not in categories and pillar_key not in ("css_quality", "js_bloat"):
+        raise HTTPException(status_code=400, detail=f"Unknown pillar: {pillar_key}")
+
+    url = report.get("url")
+    if not url:
+        raise HTTPException(status_code=500, detail="Audit missing URL")
+
+    # Re-fetch the page for pillars that need rendered HTML. Accessibility is
+    # url-only (it launches Playwright internally), but we fetch anyway so a
+    # retry on any pillar uses fresh HTML rather than whatever the crawl saw.
+    try:
+        html_content, soup = await fetch_page(url)
+    except Exception as e:
+        logger.error(f"Retry fetch failed for {url}: {e}")
+        raise HTTPException(status_code=502, detail=f"Could not re-fetch page: {e}")
+
+    # Pillar-key -> (runner, affected_category_keys). css_quality and js_bloat
+    # share a single auditor; retrying either re-runs run_css_js_audit and
+    # updates both categories.
+    async def _run(key: str) -> tuple[dict, list[str]]:
+        if key == "semantic_html":
+            return _safe_run_pillar("semantic_html", run_html_audit, soup, html_content), ["semantic_html"]
+        if key == "structured_data":
+            return _safe_run_pillar("structured_data", run_structured_data_audit, html_content, url), ["structured_data"]
+        if key == "aeo_content":
+            return _safe_run_pillar("aeo_content", run_aeo_content_audit, soup, html_content), ["aeo_content"]
+        if key in ("css_quality", "js_bloat"):
+            return _safe_run_pillar("css_js", run_css_js_audit, soup, html_content), ["css_quality", "js_bloat"]
+        if key == "rag_readiness":
+            return _safe_run_pillar("rag_readiness", run_rag_readiness_audit, soup, html_content), ["rag_readiness"]
+        if key == "agentic_protocols":
+            return _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url), ["agentic_protocols"]
+        if key == "data_integrity":
+            return _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content), ["data_integrity"]
+        if key == "internal_linking":
+            return _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, url, site_data=None), ["internal_linking"]
+        if key == "accessibility":
+            return await _safe_run_pillar_async("accessibility", run_accessibility_audit, url), ["accessibility"]
+        raise HTTPException(status_code=400, detail=f"Unsupported pillar: {key}")
+
+    new_res, affected = await _run(pillar_key)
+
+    # Splice the new pillar result(s) into categories. For css/js, we split
+    # checks across the two sub-pillars using the same key partition as
+    # scoring.py and report_generator.py.
+    def _update_category(cat_key: str, checks: dict, pillar_res: dict) -> None:
+        cat = categories.setdefault(cat_key, {})
+        status = pillar_res.get("scan_status", "ok")
+        cat["checks"] = checks
+        cat["scan_status"] = status
+        if status == "ok":
+            cat.pop("scan_error", None)
+        else:
+            err = pillar_res.get("scan_error")
+            if err:
+                cat["scan_error"] = err
+
+        # Recompute score from this sub-pillar's findings
+        findings_for_score: list[dict] = []
+        for check in (checks or {}).values():
+            if isinstance(check, dict) and check.get("findings"):
+                findings_for_score.extend(check["findings"])
+        sub_score = calculate_score(findings_for_score)
+        cat["score"] = sub_score
+        cat["label"] = get_label(sub_score)
+
+    if affected == ["css_quality", "js_bloat"]:
+        css_keys = ["framework_detection", "naming_consistency", "inline_styles", "external_stylesheets", "render_blocking"]
+        js_keys = ["webflow_js_bloat", "third_party_scripts", "total_scripts"]
+        all_checks = new_res.get("checks", {}) or {}
+        _update_category("css_quality", {k: v for k, v in all_checks.items() if k in css_keys}, new_res)
+        _update_category("js_bloat", {k: v for k, v in all_checks.items() if k in js_keys}, new_res)
+    else:
+        _update_category(affected[0], new_res.get("checks", {}) or {}, new_res)
+
+    # Recompute coverage_weight + overall_score from the updated categories.
+    covered_weight = 0.0
+    weighted_sum = 0.0
+    scan_statuses: dict[str, str] = {}
+    for pk, weight in PILLAR_WEIGHTS.items():
+        cat = categories.get(pk, {})
+        status = cat.get("scan_status", "ok")
+        scan_statuses[pk] = status
+        if status == "ok":
+            covered_weight += weight
+            weighted_sum += (cat.get("score") or 0) * weight
+
+    if covered_weight < MIN_COVERAGE_FOR_SCORE:
+        report["overall_score"] = None
+        report["overall_label"] = "Scan incomplete"
+    else:
+        report["overall_score"] = int(round(weighted_sum / covered_weight))
+        report["overall_label"] = get_label(report["overall_score"])
+    report["coverage_weight"] = round(covered_weight, 4)
+    report["scan_statuses"] = scan_statuses
+
+    # Rebuild top-level finding aggregates from the per-pillar checks so the
+    # summary counters and Top Priorities list reflect the retry outcome.
+    all_findings: list[dict] = []
+    for cat in categories.values():
+        if cat.get("scan_status", "ok") != "ok":
+            continue
+        for check in (cat.get("checks") or {}).values():
+            if isinstance(check, dict) and check.get("findings"):
+                all_findings.extend(check["findings"])
+
+    sorted_findings = sorted(
+        all_findings,
+        key=lambda x: {"critical": 0, "high": 1, "medium": 2}.get(x.get("severity", ""), 3),
+    )
+    report["summary"] = {
+        "total_findings": len(all_findings),
+        "critical": sum(1 for f in all_findings if f.get("severity") == "critical"),
+        "high": sum(1 for f in all_findings if f.get("severity") == "high"),
+        "medium": sum(1 for f in all_findings if f.get("severity") == "medium"),
+        "top_priorities": [f.get("recommendation", "") for f in sorted_findings[:5]],
+    }
+
+    # Append any new positives produced by a successful retry. The pillar
+    # previously failed and contributed none, so appending (not de-duping) is
+    # safe.
+    if new_res.get("scan_status", "ok") == "ok":
+        new_positives = new_res.get("positive_findings") or []
+        if new_positives:
+            existing = report.get("positive_findings") or []
+            for p in new_positives:
+                if isinstance(p, str):
+                    existing.append(p)
+                elif isinstance(p, dict):
+                    existing.append(p.get("text") or p.get("message") or p.get("description") or str(p))
+                else:
+                    existing.append(str(p))
+            report["positive_findings"] = existing
+
+    # Persist. coverage_weight needs its own column; overall_score may be None
+    # now (Option C) so the normalized tables' integer column must allow NULL.
+    import db_postgres as _db_pg
+    _aid = uuid.UUID(str(audit_id))
+    pool = await _db_pg.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE audits
+               SET report_json = $1,
+                   overall_score = $2,
+                   overall_label = $3,
+                   coverage_weight = $4
+               WHERE id = $5""",
+            json.dumps(report),
+            report.get("overall_score"),
+            report.get("overall_label"),
+            report.get("coverage_weight"),
+            _aid,
+        )
+        # Sync pillar_scores rows (score + scan_status) for the affected sub-pillars.
+        for pk in affected:
+            cat = categories.get(pk, {})
+            await conn.execute(
+                """INSERT INTO pillar_scores (audit_id, pillar_key, score, label, finding_count, scan_status)
+                   VALUES ($1, $2, $3, $4, $5, $6)
+                   ON CONFLICT (audit_id, pillar_key) DO UPDATE
+                   SET score = EXCLUDED.score,
+                       label = EXCLUDED.label,
+                       finding_count = EXCLUDED.finding_count,
+                       scan_status = EXCLUDED.scan_status""",
+                _aid,
+                pk,
+                cat.get("score") or 0,
+                cat.get("label") or "",
+                sum(
+                    1
+                    for check in (cat.get("checks") or {}).values()
+                    if isinstance(check, dict)
+                    for _ in check.get("findings") or []
+                ),
+                cat.get("scan_status", "ok"),
+            )
+
+    return {
+        "status": "ok",
+        "pillar_key": pillar_key,
+        "scan_status": new_res.get("scan_status", "ok"),
+        "new_score": categories.get(pillar_key, {}).get("score"),
+        "overall_score": report.get("overall_score"),
+        "coverage_weight": report.get("coverage_weight"),
+        "message": (
+            f"Retry succeeded — {pillar_key} now has scan_status={new_res.get('scan_status')}"
+            if new_res.get("scan_status", "ok") == "ok"
+            else f"Retry failed — pillar still unavailable: {new_res.get('scan_error', 'unknown error')}"
+        ),
+    }
+
+
 @app.get("/api/audit/enrichment-status/{audit_id}")
 async def get_enrichment_status(audit_id: str):
     """Lightweight endpoint to poll enrichment progress.
@@ -928,15 +1177,15 @@ async def run_page_audit(request: PageAuditRequest):
         try:
             html_content, soup = await fetch_page(url)
 
-            html_res = run_html_audit(soup, html_content)
-            sd_res = run_structured_data_audit(html_content, url)
-            css_js_res = run_css_js_audit(soup, html_content)
-            aeo_res = run_aeo_content_audit(soup, html_content)
-            rag_res = run_rag_readiness_audit(soup, html_content)
-            agent_res = run_agentic_protocol_audit(soup, html_content, url)
-            data_res = run_data_integrity_audit(soup, html_content)
-            il_res = run_internal_linking_audit(soup, html_content, url, site_data=None)
-            a11y_res = await run_accessibility_audit(url)
+            html_res = _safe_run_pillar("semantic_html", run_html_audit, soup, html_content)
+            sd_res = _safe_run_pillar("structured_data", run_structured_data_audit, html_content, url)
+            css_js_res = _safe_run_pillar("css_js", run_css_js_audit, soup, html_content)
+            aeo_res = _safe_run_pillar("aeo_content", run_aeo_content_audit, soup, html_content)
+            rag_res = _safe_run_pillar("rag_readiness", run_rag_readiness_audit, soup, html_content)
+            agent_res = _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url)
+            data_res = _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content)
+            il_res = _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, url, site_data=None)
+            a11y_res = await _safe_run_pillar_async("accessibility", run_accessibility_audit, url)
 
             scores = compile_scores(
                 html_res, sd_res, aeo_res, css_js_res, a11y_res,

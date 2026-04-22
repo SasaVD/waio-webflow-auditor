@@ -2,32 +2,48 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, cast, Optional
 
 def generate_report(url: str, html_res: dict, sd_res: dict, aeo_res: dict, css_js_res: dict, a11y_res: dict, rag_res: dict, agent_res: dict, data_res: dict, scores: dict, il_res: Optional[Dict[str, Any]] = None, tier: str = "free") -> Dict[str, Any]:
+    # Defense-in-depth: only pull findings/positives from pillars that scanned
+    # successfully. Failed pillars should produce no findings upstream (the
+    # outer except in accessibility_auditor no longer synthesizes one), but
+    # guard here too so Priority Action Items can't surface a raw
+    # "Failed to run complete accessibility scan" error as a recommendation.
+    def _ok(res: Optional[Dict[str, Any]]) -> bool:
+        if not res:
+            return False
+        return res.get("scan_status", "ok") == "ok"
+
+    def _findings_if_ok(res: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return res.get("findings", []) if _ok(res) else []
+
+    def _positives_if_ok(res: Optional[Dict[str, Any]]) -> List[Any]:
+        return res.get("positive_findings", []) if _ok(res) else []
+
     all_findings: List[Dict[str, Any]] = cast(List[Dict[str, Any]], (
-        html_res.get("findings", []) + 
-        sd_res.get("findings", []) + 
-        aeo_res.get("findings", []) +
-        css_js_res.get("findings", []) + 
-        a11y_res.get("findings", []) +
-        rag_res.get("findings", []) +
-        agent_res.get("findings", []) +
-        data_res.get("findings", []) +
-        il_res.get("findings", []) if il_res else []
+        _findings_if_ok(html_res) +
+        _findings_if_ok(sd_res) +
+        _findings_if_ok(aeo_res) +
+        _findings_if_ok(css_js_res) +
+        _findings_if_ok(a11y_res) +
+        _findings_if_ok(rag_res) +
+        _findings_if_ok(agent_res) +
+        _findings_if_ok(data_res) +
+        _findings_if_ok(il_res)
     ))
-    
+
     crit = sum(1 for f in all_findings if f['severity'] == 'critical')
     high = sum(1 for f in all_findings if f['severity'] == 'high')
     med = sum(1 for f in all_findings if f['severity'] == 'medium')
-    
+
     raw_positive = (
-        html_res.get("positive_findings", []) +
-        sd_res.get("positive_findings", []) +
-        aeo_res.get("positive_findings", []) +
-        css_js_res.get("positive_findings", []) +
-        a11y_res.get("positive_findings", []) +
-        rag_res.get("positive_findings", []) +
-        agent_res.get("positive_findings", []) +
-        data_res.get("positive_findings", []) +
-        (il_res.get("positive_findings", []) if il_res else [])
+        _positives_if_ok(html_res) +
+        _positives_if_ok(sd_res) +
+        _positives_if_ok(aeo_res) +
+        _positives_if_ok(css_js_res) +
+        _positives_if_ok(a11y_res) +
+        _positives_if_ok(rag_res) +
+        _positives_if_ok(agent_res) +
+        _positives_if_ok(data_res) +
+        _positives_if_ok(il_res)
     )
     # Normalize: some auditors return strings, others return dicts with "text" key
     all_positive = []
@@ -45,60 +61,40 @@ def generate_report(url: str, html_res: dict, sd_res: dict, aeo_res: dict, css_j
     for f in sorted_findings[:5]:  # type: ignore
          top_priorities.append(f['recommendation'])
 
-    categories = {
-        "semantic_html": {
-            "score": scores["scores"]["semantic_html"],
-            "label": scores["labels"]["semantic_html"],
-            "checks": html_res.get("checks", {})
-        },
-        "structured_data": {
-            "score": scores["scores"]["structured_data"],
-            "label": scores["labels"]["structured_data"],
-            "checks": sd_res.get("checks", {})
-        },
-        "aeo_content": {
-            "score": scores["scores"]["aeo_content"],
-            "label": scores["labels"]["aeo_content"],
-            "checks": aeo_res.get("checks", {})
-        },
-        "css_quality": {
-            "score": scores["scores"]["css_quality"],
-            "label": scores["labels"]["css_quality"],
-            "checks": {k: v for k, v in css_js_res.get("checks", {}).items() if k in ["framework_detection", "naming_consistency", "inline_styles", "external_stylesheets", "render_blocking"]}
-        },
-        "js_bloat": {
-            "score": scores["scores"]["js_bloat"],
-            "label": scores["labels"]["js_bloat"],
-            "checks": {k: v for k, v in css_js_res.get("checks", {}).items() if k in ["webflow_js_bloat", "third_party_scripts", "total_scripts"]}
-        },
-        "accessibility": {
-            "score": scores["scores"]["accessibility"],
-            "label": scores["labels"]["accessibility"],
-            "checks": a11y_res.get("checks", {})
-        },
-        "rag_readiness": {
-            "score": scores["scores"]["rag_readiness"],
-            "label": scores["labels"]["rag_readiness"],
-            "checks": rag_res.get("checks", {})
-        },
-        "agentic_protocols": {
-            "score": scores["scores"]["agentic_protocols"],
-            "label": scores["labels"]["agentic_protocols"],
-            "checks": agent_res.get("checks", {})
-        },
-        "data_integrity": {
-            "score": scores["scores"]["data_integrity"],
-            "label": scores["labels"]["data_integrity"],
-            "checks": data_res.get("checks", {})
+    scan_statuses = scores.get("scan_statuses", {}) or {}
+
+    def _cat(pillar_key: str, res: Optional[Dict[str, Any]], checks: Dict[str, Any]) -> Dict[str, Any]:
+        status = scan_statuses.get(pillar_key, "ok")
+        entry: Dict[str, Any] = {
+            "score": scores["scores"][pillar_key],
+            "label": scores["labels"][pillar_key],
+            "scan_status": status,
+            "checks": checks,
         }
+        if status != "ok" and res is not None:
+            err = res.get("scan_error")
+            if err:
+                entry["scan_error"] = err
+        return entry
+
+    css_checks_all = css_js_res.get("checks", {}) if css_js_res else {}
+    css_quality_checks = {k: v for k, v in css_checks_all.items() if k in ["framework_detection", "naming_consistency", "inline_styles", "external_stylesheets", "render_blocking"]}
+    js_bloat_checks = {k: v for k, v in css_checks_all.items() if k in ["webflow_js_bloat", "third_party_scripts", "total_scripts"]}
+
+    categories = {
+        "semantic_html": _cat("semantic_html", html_res, html_res.get("checks", {})),
+        "structured_data": _cat("structured_data", sd_res, sd_res.get("checks", {})),
+        "aeo_content": _cat("aeo_content", aeo_res, aeo_res.get("checks", {})),
+        "css_quality": _cat("css_quality", css_js_res, css_quality_checks),
+        "js_bloat": _cat("js_bloat", css_js_res, js_bloat_checks),
+        "accessibility": _cat("accessibility", a11y_res, a11y_res.get("checks", {})),
+        "rag_readiness": _cat("rag_readiness", rag_res, rag_res.get("checks", {})),
+        "agentic_protocols": _cat("agentic_protocols", agent_res, agent_res.get("checks", {})),
+        "data_integrity": _cat("data_integrity", data_res, data_res.get("checks", {})),
     }
 
     if il_res:
-        categories["internal_linking"] = {
-            "score": scores["scores"]["internal_linking"],
-            "label": scores["labels"]["internal_linking"],
-            "checks": il_res.get("checks", {})
-        }
+        categories["internal_linking"] = _cat("internal_linking", il_res, il_res.get("checks", {}))
 
     return {
         "url": url,
@@ -106,6 +102,8 @@ def generate_report(url: str, html_res: dict, sd_res: dict, aeo_res: dict, css_j
         "audit_timestamp": datetime.now(timezone.utc).isoformat(),
         "overall_score": scores["overall_score"],
         "overall_label": scores["overall_label"],
+        "coverage_weight": scores.get("coverage_weight", 1.0),
+        "scan_statuses": scan_statuses,
         "categories": categories,
         "positive_findings": all_positive,
         "summary": {

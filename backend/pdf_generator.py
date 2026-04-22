@@ -85,10 +85,16 @@ def generate_pdf(report: dict) -> bytes:
     except Exception:
         ts_display = timestamp
 
-    overall_score = report.get("overall_score", 0)
+    overall_score = report.get("overall_score")
     overall_label = report.get("overall_label", "N/A")
+    coverage_weight = report.get("coverage_weight", 1.0)
     summary = report.get("summary", {})
     x_start = 12
+
+    # BUG-1: suppress the score entirely if coverage < 0.70 floor.
+    overall_display = "—" if overall_score is None else str(overall_score)
+    if overall_score is None:
+        overall_label = "Scan Incomplete"
 
     # -- URL + timestamp --
     pdf.set_font("Helvetica", "B", 12)
@@ -108,7 +114,7 @@ def generate_pdf(report: dict) -> bytes:
     pdf.set_font("Helvetica", "B", 28)
     pdf.set_text_color(*sc)
     pdf.set_xy(x_start, y_start + 3)
-    pdf.cell(40, 12, str(overall_score), align="C")
+    pdf.cell(40, 12, overall_display, align="C")
     pdf.set_font("Helvetica", "B", 7)
     pdf.set_xy(x_start, y_start + 16)
     pdf.cell(40, 5, _safe(overall_label.upper()), align="C")
@@ -142,6 +148,23 @@ def generate_pdf(report: dict) -> bytes:
 
     pdf.set_xy(x_start, y_start + 34)
 
+    # -- Coverage caution strip (BUG-1) --
+    # When coverage_weight < 1.0 one or more pillars failed; disclose this
+    # above the pillar grid so the reader can see why the pillar tiles read
+    # "Scan incomplete" and can't accidentally mistake a renormalized score
+    # for a full-coverage one.
+    if coverage_weight < 1.0:
+        pct = int(round(coverage_weight * 100))
+        strip_y = pdf.get_y()
+        pdf.set_fill_color(254, 243, 199)  # amber-50
+        pdf.rect(x_start, strip_y, 186, 7, 'F')
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.set_text_color(146, 64, 14)  # amber-800
+        pdf.set_xy(x_start + 2, strip_y + 1.5)
+        msg = f"Partial scan: {pct}% pillar coverage. Failed pillars are marked 'Scan incomplete' and excluded from the overall score."
+        pdf.cell(184, 4, _safe(msg))
+        pdf.set_xy(x_start, strip_y + 9)
+
     # -- Pillar score cards --
     pdf.ln(2)
     pillar_y = pdf.get_y()
@@ -149,23 +172,42 @@ def generate_pdf(report: dict) -> bytes:
     pw = 28.5
     for key, cat in report.get("categories", {}).items():
         cat_label = PILLAR_META.get(key, key)
+        scan_status = cat.get("scan_status", "ok")
         score = cat.get("score", 0)
         rating = cat.get("label", "N/A")
         color = _score_color(rating)
-        pdf.set_fill_color(248, 249, 250)
-        pdf.rect(pillar_x, pillar_y, pw, 22, 'F')
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.set_text_color(*color)
-        pdf.set_xy(pillar_x, pillar_y + 2)
-        pdf.cell(pw, 8, str(score), align="C")
-        pdf.set_font("Helvetica", "B", 6)
-        pdf.set_text_color(55, 65, 81)
-        pdf.set_xy(pillar_x, pillar_y + 10)
-        pdf.cell(pw, 4, _safe(cat_label), align="C")
-        pdf.set_font("Helvetica", "", 5)
-        pdf.set_text_color(*color)
-        pdf.set_xy(pillar_x, pillar_y + 15)
-        pdf.cell(pw, 4, _safe(rating.upper()), align="C")
+        if scan_status != "ok":
+            # Render the pillar tile in a muted grey state instead of showing
+            # a score. Source: a11y_res failed → no reliable score exists.
+            pdf.set_fill_color(241, 243, 246)
+            pdf.rect(pillar_x, pillar_y, pw, 22, 'F')
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_text_color(148, 163, 184)
+            pdf.set_xy(pillar_x, pillar_y + 3)
+            pdf.cell(pw, 6, "—", align="C")
+            pdf.set_font("Helvetica", "B", 6)
+            pdf.set_text_color(55, 65, 81)
+            pdf.set_xy(pillar_x, pillar_y + 10)
+            pdf.cell(pw, 4, _safe(cat_label), align="C")
+            pdf.set_font("Helvetica", "", 5)
+            pdf.set_text_color(148, 163, 184)
+            pdf.set_xy(pillar_x, pillar_y + 15)
+            pdf.cell(pw, 4, "SCAN INCOMPLETE", align="C")
+        else:
+            pdf.set_fill_color(248, 249, 250)
+            pdf.rect(pillar_x, pillar_y, pw, 22, 'F')
+            pdf.set_font("Helvetica", "B", 14)
+            pdf.set_text_color(*color)
+            pdf.set_xy(pillar_x, pillar_y + 2)
+            pdf.cell(pw, 8, str(score), align="C")
+            pdf.set_font("Helvetica", "B", 6)
+            pdf.set_text_color(55, 65, 81)
+            pdf.set_xy(pillar_x, pillar_y + 10)
+            pdf.cell(pw, 4, _safe(cat_label), align="C")
+            pdf.set_font("Helvetica", "", 5)
+            pdf.set_text_color(*color)
+            pdf.set_xy(pillar_x, pillar_y + 15)
+            pdf.cell(pw, 4, _safe(rating.upper()), align="C")
         pillar_x += pw + 2.5
 
     pdf.set_xy(x_start, pillar_y + 28)

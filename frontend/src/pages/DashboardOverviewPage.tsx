@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { motion } from 'framer-motion';
 import {
@@ -26,6 +26,7 @@ import {
   Shield,
   Clock,
   Server,
+  RotateCw,
 } from 'lucide-react';
 import { useAuditStore } from '../stores/auditStore';
 import { KpiCard } from '../components/dashboard/KpiCard';
@@ -101,8 +102,12 @@ interface Finding {
   pillar?: string;
 }
 
+const apiBase = import.meta.env.PROD ? '' : 'http://127.0.0.1:8000';
+
 export default function DashboardOverviewPage() {
   const report = useAuditStore((s) => s.report);
+  const fetchReport = useAuditStore((s) => s.fetchReport);
+  const [retrying, setRetrying] = useState<string | null>(null);
 
   // Flatten all findings with pillar key
   const allFindings = useMemo(() => {
@@ -151,6 +156,8 @@ export default function DashboardOverviewPage() {
         ...meta,
         score: report.categories[key].score ?? 0,
         label: report.categories[key].label ?? '',
+        scanStatus: (report.categories[key].scan_status as string) ?? 'ok',
+        scanError: (report.categories[key].scan_error as string | undefined) ?? undefined,
       }));
   }, [report]);
 
@@ -239,12 +246,38 @@ export default function DashboardOverviewPage() {
     );
   }
 
-  const overallScore = report.overall_score ?? 0;
+  const rawOverall = report.overall_score;
+  const scoreSuppressed = rawOverall === null || rawOverall === undefined;
+  const overallScore = scoreSuppressed ? 0 : (rawOverall as number);
+  const coverageWeight = (report.coverage_weight as number) ?? 1.0;
+  const coveragePct = Math.round(coverageWeight * 100);
+  const partialCoverage = coverageWeight < 1.0;
+  const failedPillars = pillarScores.filter((p) => p.scanStatus !== 'ok').map((p) => p.label);
   const crit = report.summary?.critical ?? 0;
   const high = report.summary?.high ?? 0;
   const med = report.summary?.medium ?? 0;
   const totalFindings = report.summary?.total_findings ?? allFindings.length;
   const positiveCount = report.positive_findings?.length ?? 0;
+
+  const handleRetryPillar = async (pillarKey: string) => {
+    if (!report?.audit_id || retrying) return;
+    setRetrying(pillarKey);
+    try {
+      const res = await fetch(
+        `${apiBase}/api/audit/${report.audit_id}/recompute-pillar/${pillarKey}`,
+        { method: 'POST', credentials: 'include' }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Retry failed' }));
+        throw new Error(err.detail || 'Retry failed');
+      }
+      await fetchReport(report.audit_id as string);
+    } catch (e) {
+      console.error('Retry pillar failed:', e);
+    } finally {
+      setRetrying(null);
+    }
+  };
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-8">
@@ -292,37 +325,72 @@ export default function DashboardOverviewPage() {
           <div
             className="w-16 h-16 rounded-xl flex items-center justify-center border-2"
             style={{
-              borderColor: scoreColor(overallScore),
-              backgroundColor: scoreColor(overallScore) + '15',
+              borderColor: scoreSuppressed ? '#94A3B8' : scoreColor(overallScore),
+              backgroundColor: (scoreSuppressed ? '#94A3B8' : scoreColor(overallScore)) + '15',
             }}
           >
             <span
               className="text-2xl font-extrabold font-heading"
-              style={{ color: scoreColor(overallScore) }}
+              style={{ color: scoreSuppressed ? '#94A3B8' : scoreColor(overallScore) }}
             >
-              {overallScore}
+              {scoreSuppressed ? '—' : overallScore}
             </span>
           </div>
           <div>
             <div
               className="text-sm font-bold"
-              style={{ color: scoreColor(overallScore) }}
+              style={{ color: scoreSuppressed ? '#94A3B8' : scoreColor(overallScore) }}
             >
-              {scoreLabel(overallScore)}
+              {scoreSuppressed ? 'Scan incomplete' : scoreLabel(overallScore)}
             </div>
             <div className="text-xs text-text-muted">Health Score</div>
           </div>
         </div>
       </motion.div>
 
+      {/* Coverage Disclosure Chip — shown whenever any pillar failed */}
+      {partialCoverage && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-start gap-3 p-3 rounded-lg border border-amber-500/30"
+          style={{ backgroundColor: '#F59E0B15' }}
+        >
+          <AlertTriangle size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 text-sm">
+            <span className="font-semibold text-amber-400">
+              {scoreSuppressed
+                ? `Partial scan — only ${coveragePct}% coverage.`
+                : `Partial scan — ${coveragePct}% coverage.`}
+            </span>{' '}
+            <span className="text-text-secondary">
+              {failedPillars.length > 0 && (
+                <>
+                  {failedPillars.join(', ')} {failedPillars.length === 1 ? 'pillar' : 'pillars'} failed to scan.{' '}
+                </>
+              )}
+              {scoreSuppressed
+                ? 'Overall score is suppressed because coverage dropped below 70%. Retry the failed pillars to produce a score.'
+                : 'Overall score is renormalized over the pillars that scanned successfully.'}
+            </span>
+          </div>
+        </motion.div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           label="Health Score"
-          value={overallScore}
-          subtitle={scoreLabel(overallScore)}
+          value={scoreSuppressed ? '—' : overallScore}
+          subtitle={
+            scoreSuppressed
+              ? `Scan incomplete · ${coveragePct}% coverage`
+              : partialCoverage
+                ? `${scoreLabel(overallScore)} · ${coveragePct}% coverage`
+                : scoreLabel(overallScore)
+          }
           icon={Activity}
-          color="text-score-excellent"
+          color={scoreSuppressed ? 'text-text-muted' : 'text-score-excellent'}
         />
         <KpiCard
           label="Total Findings"
@@ -432,6 +500,41 @@ export default function DashboardOverviewPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {pillarScores.map((p) => {
             const PIcon = p.icon;
+            const failed = p.scanStatus !== 'ok';
+            const isRetrying = retrying === p.key;
+
+            if (failed) {
+              return (
+                <div
+                  key={p.key}
+                  className="bg-surface-raised border border-dashed border-border-subtle rounded-xl p-4"
+                  title={p.scanError ? `Scan error: ${p.scanError}` : 'Scan did not complete'}
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-8 h-8 rounded-lg bg-surface-overlay flex items-center justify-center">
+                      <PIcon size={15} className="text-text-muted opacity-50" />
+                    </div>
+                    <span className="text-xs font-semibold text-text-muted truncate">
+                      {p.short}
+                    </span>
+                  </div>
+                  <div className="text-2xl font-extrabold font-heading mb-1 text-text-muted">—</div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-500 mb-2">
+                    Scan incomplete
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRetryPillar(p.key)}
+                    disabled={isRetrying || retrying !== null}
+                    className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold px-2 py-1.5 rounded-md border border-border hover:border-accent hover:text-accent text-text-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <RotateCw size={11} className={isRetrying ? 'animate-spin' : ''} />
+                    {isRetrying ? 'Retrying…' : 'Retry scan'}
+                  </button>
+                </div>
+              );
+            }
+
             return (
               <div
                 key={p.key}

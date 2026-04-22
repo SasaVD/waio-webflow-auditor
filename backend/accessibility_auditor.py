@@ -1,9 +1,12 @@
 import asyncio
+import logging
 from typing import Dict, Any, List
 from playwright.async_api import Browser, Page
 from axe_playwright_python.async_playwright import Axe
 from crawler import get_browser
 from utils import truncate_html
+
+logger = logging.getLogger(__name__)
 
 async def run_accessibility_audit(url: str) -> Dict[str, Any]:
     browser = await get_browser()
@@ -12,35 +15,40 @@ async def run_accessibility_audit(url: str) -> Dict[str, Any]:
         viewport={"width": 1280, "height": 800}
     )
     page = await context.new_page()
-    
+
     checks = {}
-    total_findings = 0
     positive_findings = []
     category_findings = []
-    
+    scan_status = "ok"
+    scan_error: str | None = None
+
     try:
         await page.goto(url, wait_until="networkidle", timeout=15000)
-        
+
         # 5.1 Automated WCAG Scan with Axe-Core
         checks["axe_scan"] = await check_axe_scan(page)
-        
+
         # 5.2 Touch Target Size
         checks["touch_targets"] = await check_touch_targets(page)
-        
+
         # 5.3 Focus Style Audit
         checks["focus_styles"] = await check_focus_styles(page)
-        
+
         # 5.4 Keyboard Trap Detection
         checks["keyboard_traps"] = await check_keyboard_traps(page)
-        
+
         # 5.5 ARIA Role Validation (partially covered by axe, but we'll add stub to fulfill explicit 5.5 requirement)
         checks["aria_roles"] = check_aria_roles(checks["axe_scan"])
 
     except Exception as e:
-        checks["error"] = {
-            "status": "fail",
-            "findings": [create_finding("high", f"Failed to run complete accessibility scan: {str(e)}", "Ensure site is reachable.", "wcag-2.1")]
-        }
+        # Infrastructure failure — log it, don't synthesize a scored finding.
+        # The old behaviour deducted ~10pts for a "high" finding, producing
+        # 90/100 on sites the scanner never actually reached. scan_status now
+        # propagates through scoring.compile_scores and the pillar is dropped
+        # from the overall score (with coverage_weight renormalization).
+        scan_status = "failed"
+        scan_error = str(e)
+        logger.warning("Accessibility scan failed for %s: %s", url, scan_error)
     finally:
         await context.close()
 
@@ -55,11 +63,15 @@ async def run_accessibility_audit(url: str) -> Dict[str, Any]:
         if "findings" in check_val:
             category_findings.extend(check_val["findings"])
 
-    return {
+    result: Dict[str, Any] = {
         "checks": checks,
         "positive_findings": positive_findings,
-        "findings": category_findings
+        "findings": category_findings,
+        "scan_status": scan_status,
     }
+    if scan_error:
+        result["scan_error"] = scan_error
+    return result
 
 def create_finding(severity: str, description: str, recommendation: str, reference: str) -> Dict[str, str]:
     return {
