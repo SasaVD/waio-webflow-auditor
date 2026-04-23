@@ -1215,6 +1215,16 @@ def _build_priority_actions(report: dict) -> list[dict]:
                     continue
                 raw_desc = f.get("description") or ""
                 description = _humanize_finding_description(raw_desc, pillar_key)
+                # QW3: pass the finding's per-element drill-down data
+                # through to the PDF template. Previously this aggregator
+                # dropped `elements` entirely, so the Priority Action
+                # Items section could only show the description — even
+                # when the underlying finding carried selector/location/
+                # html_snippet rows. Cap at 3 for PDF layout; the
+                # dashboard /findings view reads the full list directly
+                # from report.categories.{pillar}.checks.
+                raw_elements = f.get("elements") or []
+                elements = [e for e in raw_elements if isinstance(e, dict)][:3]
                 aggregated.append({
                     "severity": sev.title(),
                     "severity_color": _severity_color(sev),
@@ -1223,6 +1233,8 @@ def _build_priority_actions(report: dict) -> list[dict]:
                     "description": description,
                     "recommendation": f.get("recommendation") or "",
                     "credibility": f.get("credibility_anchor") or f.get("why_it_matters") or "",
+                    "elements": elements,
+                    "elements_total": len(raw_elements),
                     "sev_rank": 0 if sev == "critical" else 1,
                 })
 
@@ -1716,6 +1728,36 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .action-desc { font-weight: 700; color: #0F172A; margin-bottom: 4pt; }
   .action-rec { font-size: 10pt; color: #334155; margin-bottom: 4pt; }
   .action-cred { font-size: 9pt; font-style: italic; color: #64748B; }
+
+  /* QW3: Priority-action drill-down rows */
+  .action-affected {
+    margin-top: 6pt;
+    padding-top: 6pt;
+    border-top: 1px dashed #E2E8F0;
+  }
+  .action-affected-label {
+    font-size: 8pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748B;
+    margin-bottom: 3pt;
+  }
+  .action-affected-row {
+    font-size: 8.5pt;
+    color: #334155;
+    margin-bottom: 2pt;
+    line-height: 1.4;
+  }
+  .action-affected-loc {
+    color: #64748B;
+    font-size: 8pt;
+  }
+  .action-affected-sel {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    color: #1E1B4B;
+    word-break: break-all;
+  }
 
   /* ───── Info box ───── */
   .infobox {
@@ -2401,6 +2443,20 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <div class="action-desc">{{ a.description }}</div>
         {% if a.recommendation %}<div class="action-rec">{{ a.recommendation }}</div>{% endif %}
         {% if a.credibility %}<div class="action-cred">{{ a.credibility }}</div>{% endif %}
+        {% if a.elements %}
+          <div class="action-affected">
+            <div class="action-affected-label">
+              Affected elements{% if a.elements_total > a.elements|length %} (showing {{ a.elements|length }} of {{ a.elements_total }}){% endif %}
+            </div>
+            {% for el in a.elements %}
+              <div class="action-affected-row">
+                <span class="action-affected-loc">{{ el.location }}</span>
+                &nbsp;·&nbsp;
+                <span class="action-affected-sel">{{ el.selector }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
       </div>
     {% endfor %}
   {% endif %}
