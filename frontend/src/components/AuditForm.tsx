@@ -18,6 +18,13 @@ interface AuditFormProps {
     tier?: 'free' | 'premium',
     aiVisibilityOptIn?: boolean,
     brandName?: string,
+    /**
+     * Workstream D3: optional user-declared industry override. When empty,
+     * the backend falls back to NLP detection; if that also yields nothing,
+     * AI Visibility enters the "needs_industry_confirmation" state and the
+     * modal prompts the user mid-session.
+     */
+    targetIndustry?: string,
   ) => void;
   isLoading: boolean;
   error: string | null;
@@ -35,6 +42,7 @@ export const AuditForm: React.FC<AuditFormProps> = ({
   const [scope, setScope] = useState<'domain' | 'subdomain' | 'subfolder'>('domain');
   const [aiVisibility, setAiVisibility] = useState(true);
   const [brandName, setBrandName] = useState('');
+  const [targetIndustry, setTargetIndustry] = useState('');
 
   const handleTabChange = (value: string) => {
     if (value === 'fullsite' && !isAuthenticated) {
@@ -72,6 +80,7 @@ export const AuditForm: React.FC<AuditFormProps> = ({
         'premium',
         aiVisibility,
         brandName.trim() || undefined,
+        targetIndustry.trim() || undefined,
       );
     }
   };
@@ -301,7 +310,7 @@ export const AuditForm: React.FC<AuditFormProps> = ({
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
                         exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden"
+                        className="overflow-hidden space-y-2"
                       >
                         <div className="bg-surface-raised border border-border rounded-lg p-1">
                           <input
@@ -313,6 +322,24 @@ export const AuditForm: React.FC<AuditFormProps> = ({
                             disabled={isLoading}
                           />
                         </div>
+                        {/* Workstream D3: optional user-declared industry.
+                            Leaving blank triggers NLP detection first, then
+                            the "Needs attention" modal flow if that also
+                            yields nothing. */}
+                        <div className="bg-surface-raised border border-border rounded-lg p-1">
+                          <input
+                            type="text"
+                            className="w-full bg-transparent px-3 py-2 text-sm font-medium text-text placeholder:text-text-muted focus:outline-none"
+                            placeholder="Industry or niche (optional — e.g. Event management software, B2B SaaS, fintech)"
+                            value={targetIndustry}
+                            onChange={(e) => setTargetIndustry(e.target.value)}
+                            disabled={isLoading}
+                          />
+                        </div>
+                        <p className="text-[11px] text-text-muted px-1 leading-snug">
+                          Leave blank to auto-detect from your content. Providing
+                          this makes AI Visibility benchmarks more accurate.
+                        </p>
                       </motion.div>
                     )}
                   </AnimatePresence>

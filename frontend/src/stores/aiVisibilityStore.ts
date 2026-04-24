@@ -17,6 +17,17 @@ export interface BrandPreview {
   run_count: number;
 }
 
+/**
+ * Resolved-industry block carried on report.ai_visibility.industry
+ * (Workstream D3, Contract 2). The frontend uses `source` to branch:
+ * null → render "Needs attention"; "user_declared" / "nlp_detected" → normal tile.
+ */
+export interface AIVisibilityIndustry {
+  value: string | null;
+  source: 'user_declared' | 'nlp_detected' | null;
+  user_provided: string | null;
+}
+
 export interface EngineResult {
   status: 'ok' | 'failed';
   cost_usd: number;
@@ -35,6 +46,14 @@ export interface AIVisibilityData {
   run_count: number;
   brand_name: string;
   brand_name_source: string;
+  /**
+   * Workstream D3 Contract 2: resolved industry. Use `industry.value` +
+   * `industry.source` for all rendering decisions. The legacy flat
+   * `detected_industry` field is still emitted by the backend for
+   * backwards-compat but will be removed once all readers migrate.
+   */
+  industry?: AIVisibilityIndustry;
+  /** @deprecated Use `industry.value`. Kept for backwards-compat with old payloads. */
   detected_industry: string | null;
   competitors: { domains: string[]; source: string };
   mentions_database: {
@@ -65,7 +84,18 @@ export interface AIVisibilityData {
   duration_seconds: number;
 }
 
-type AIVisibilityStatus = 'idle' | 'loading' | 'not_computed' | 'running' | 'ok' | 'partial' | 'failed';
+type AIVisibilityStatus =
+  | 'idle'
+  | 'loading'
+  | 'not_computed'
+  | 'running'
+  | 'ok'
+  | 'partial'
+  | 'failed'
+  // Workstream D3: when resolve_industry() returns (None, None), the engine
+  // emits this status and the dashboard renders a "Needs attention" card
+  // prompting the user to declare an industry.
+  | 'needs_industry_confirmation';
 
 interface AIVisibilityState {
   data: AIVisibilityData | null;
@@ -76,7 +106,16 @@ interface AIVisibilityState {
 
   fetchStatus: (auditId: string) => Promise<void>;
   fetchBrandPreview: (auditId: string) => Promise<void>;
-  startRecompute: (auditId: string, brandName: string) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Kick off an AI Visibility recompute. `targetIndustry` (Workstream D3)
+   * is optional — when provided it becomes the user-declared override and
+   * the backend writes `industry.source = "user_declared"`.
+   */
+  startRecompute: (
+    auditId: string,
+    brandName: string,
+    targetIndustry?: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   startPolling: (auditId: string) => void;
   stopPolling: () => void;
   reset: () => void;
@@ -135,13 +174,23 @@ export const useAIVisibilityStore = create<AIVisibilityState>((set, get) => ({
     }
   },
 
-  startRecompute: async (auditId: string, brandName: string) => {
+  startRecompute: async (auditId: string, brandName: string, targetIndustry?: string) => {
     try {
+      const body: Record<string, string> = { brand_name: brandName };
+      // Workstream D3: only include target_industry when non-empty. An empty
+      // string must NOT override any existing user_provided — the backend's
+      // empty-string handling treats "" the same as null (falls through to
+      // NLP), but being explicit here avoids accidental blanking on edits
+      // where the user didn't change the industry.
+      const trimmedIndustry = targetIndustry?.trim();
+      if (trimmedIndustry) {
+        body.target_industry = trimmedIndustry;
+      }
       const res = await fetch(`${apiBase}/api/audit/${auditId}/recompute-ai-visibility`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ brand_name: brandName }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const errData = await res.json();

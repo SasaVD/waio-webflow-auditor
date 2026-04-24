@@ -1,12 +1,24 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Eye, AlertTriangle, DollarSign } from 'lucide-react';
+import { X, Eye, AlertTriangle, DollarSign, Pencil } from 'lucide-react';
 import { useAIVisibilityStore } from '../../stores/aiVisibilityStore';
 
 interface AIVisibilityModalProps {
   auditId: string;
   open: boolean;
   onClose: () => void;
+  /**
+   * Workstream D3: resolved industry from report.ai_visibility.industry,
+   * surfaced through the modal so users can confirm or override before
+   * kicking off a recompute. When undefined/null.value, the modal renders
+   * the "Needs attention" state and disables the run button until an
+   * industry is provided.
+   */
+  initialIndustry?: {
+    value: string | null;
+    source: 'user_declared' | 'nlp_detected' | null;
+    user_provided: string | null;
+  } | null;
 }
 
 // Mirror of backend AMBIGUOUS_COMMON_WORDS in ai_visibility/brand_resolver.py.
@@ -33,11 +45,22 @@ function checkBrandAmbiguity(raw: string): string | null {
   return null;
 }
 
-export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalProps) {
+export function AIVisibilityModal({
+  auditId,
+  open,
+  onClose,
+  initialIndustry,
+}: AIVisibilityModalProps) {
   const { brandPreview, fetchBrandPreview, startRecompute, error } = useAIVisibilityStore();
   const [brandName, setBrandName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Workstream D3: industry editor state. When the user clicks "Edit" next to
+  // the resolved industry (or if there's no resolved industry at all), this
+  // opens an inline text field.
+  const [industryDraft, setIndustryDraft] = useState<string>('');
+  const [industryEditing, setIndustryEditing] = useState<boolean>(false);
 
   useEffect(() => {
     if (open) {
@@ -53,13 +76,34 @@ export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalP
     }
   }, [brandPreview]);
 
+  // Seed the industry editor from props when the modal opens. If the
+  // resolver returned (None, None), the editor auto-opens and the submit
+  // button stays disabled until the user types something.
+  useEffect(() => {
+    if (!open) return;
+    const preset =
+      initialIndustry?.user_provided
+      ?? initialIndustry?.value
+      ?? '';
+    setIndustryDraft(preset);
+    // Auto-open editor when there's no resolved value — user MUST specify.
+    setIndustryEditing(!initialIndustry || initialIndustry.value === null);
+  }, [open, initialIndustry]);
+
   const ambiguityWarning = checkBrandAmbiguity(brandName);
+  const needsIndustry =
+    !initialIndustry
+    || initialIndustry.value === null
+    || initialIndustry.source === null;
+  const industryEffective = industryDraft.trim() || initialIndustry?.value || '';
+  const canSubmit = Boolean(brandName.trim() && industryEffective);
 
   const handleSubmit = async () => {
-    if (!brandName.trim()) return;
+    if (!canSubmit) return;
     setSubmitting(true);
     setSubmitError(null);
-    const result = await startRecompute(auditId, brandName.trim());
+    const industryToSend = industryDraft.trim() || undefined;
+    const result = await startRecompute(auditId, brandName.trim(), industryToSend);
     setSubmitting(false);
     if (result.ok) {
       onClose();
@@ -68,7 +112,12 @@ export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalP
     }
   };
 
-  const industryLeaf = brandPreview?.detected_industry
+  const resolvedIndustryDisplay =
+    industryDraft.trim()
+    || initialIndustry?.value
+    || brandPreview?.detected_industry
+    || null;
+  const industryLeaf = resolvedIndustryDisplay
     ?.split('/')
     .filter(Boolean)
     .pop();
@@ -155,17 +204,67 @@ export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalP
                   )}
                 </div>
 
-                {/* Industry (read-only) */}
-                {industryLeaf && (
-                  <div>
-                    <label className="text-xs font-semibold text-text-muted uppercase tracking-widest block mb-1.5">
-                      Detected Industry
-                    </label>
-                    <div className="px-3 py-2.5 bg-surface-overlay border border-border rounded-xl text-sm text-text-secondary">
-                      {industryLeaf}
+                {/* Industry — Workstream D3: editable with "Needs attention"
+                    state when neither user nor NLP provided a value. */}
+                <div>
+                  <label className="text-xs font-semibold text-text-muted uppercase tracking-widest block mb-1.5">
+                    Industry
+                    {initialIndustry?.source === 'user_declared' && (
+                      <span className="ml-2 text-[10px] font-normal text-text-muted normal-case tracking-normal">
+                        (set by you)
+                      </span>
+                    )}
+                    {initialIndustry?.source === 'nlp_detected' && (
+                      <span className="ml-2 text-[10px] font-normal text-text-muted normal-case tracking-normal">
+                        (auto-detected)
+                      </span>
+                    )}
+                  </label>
+
+                  {/* Needs attention banner if unresolved and editor is closed */}
+                  {needsIndustry && !industryEditing && (
+                    <div className="mb-2 flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+                      <AlertTriangle size={14} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                      <div className="text-xs text-amber-200 leading-snug">
+                        We couldn't auto-detect your industry. Please specify it so
+                        AI Visibility benchmarks compare against the right peers.
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+
+                  {industryEditing ? (
+                    <input
+                      type="text"
+                      value={industryDraft}
+                      onChange={(e) => setIndustryDraft(e.target.value)}
+                      placeholder="e.g. Event management software, B2B SaaS, fintech"
+                      className="w-full px-3 py-2.5 bg-surface-overlay border border-amber-500/40 rounded-xl text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-all"
+                      autoFocus
+                    />
+                  ) : (
+                    <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-surface-overlay border border-border rounded-xl text-sm text-text-secondary">
+                      <span className="truncate">
+                        {industryLeaf || (
+                          <span className="text-text-muted italic">Not set</span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIndustryEditing(true)}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-accent hover:text-accent-hover transition-colors"
+                      >
+                        <Pencil size={11} /> Edit
+                      </button>
+                    </div>
+                  )}
+                  {!needsIndustry && (
+                    <p className="text-[10px] text-text-muted mt-1">
+                      Leave blank to keep the current value. Providing a more
+                      specific industry improves AI Visibility benchmarks.
+                    </p>
+                  )}
+                </div>
+
 
                 {/* Cost disclaimer */}
                 <div className="flex items-start gap-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
@@ -204,10 +303,16 @@ export function AIVisibilityModal({ auditId, open, onClose }: AIVisibilityModalP
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={submitting || !brandName.trim()}
+                  disabled={submitting || !canSubmit}
                   className="px-5 py-2 text-sm font-bold text-white bg-accent hover:bg-accent-hover rounded-xl shadow-glow-accent/20 hover:shadow-glow-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {submitting ? 'Starting...' : ambiguityWarning ? 'Run Anyway' : 'Run Analysis'}
+                  {submitting
+                    ? 'Starting...'
+                    : !industryEffective
+                      ? 'Specify an industry'
+                      : ambiguityWarning
+                        ? 'Run Anyway'
+                        : 'Run Analysis'}
                 </button>
               </div>
             </div>

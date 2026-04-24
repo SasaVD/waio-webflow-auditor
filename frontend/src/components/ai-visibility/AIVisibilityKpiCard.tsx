@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { motion } from 'framer-motion';
-import { Eye, ChevronRight, Loader2, Target, AlertCircle } from 'lucide-react';
+import { Eye, ChevronRight, Loader2, Target, AlertCircle, AlertTriangle } from 'lucide-react';
 import { useAIVisibilityStore } from '../../stores/aiVisibilityStore';
 import { AIVisibilityModal } from './AIVisibilityModal';
 
@@ -12,6 +12,11 @@ interface AIVisibilityKpiCardProps {
 export function AIVisibilityKpiCard({ auditId }: AIVisibilityKpiCardProps) {
   const { data, status, fetchStatus } = useAIVisibilityStore();
   const [modalOpen, setModalOpen] = useState(false);
+
+  // Workstream D3: resolved industry block — feeds the modal so users can
+  // confirm/edit before running. `null` (or missing block) triggers the
+  // needs-attention state both here and inside the modal.
+  const industry = data?.industry ?? null;
 
   useEffect(() => {
     fetchStatus(auditId);
@@ -55,6 +60,50 @@ export function AIVisibilityKpiCard({ auditId }: AIVisibilityKpiCardProps) {
           auditId={auditId}
           open={modalOpen}
           onClose={() => setModalOpen(false)}
+          initialIndustry={industry}
+        />
+      </>
+    );
+  }
+
+  // Needs industry confirmation (Workstream D3) — neither the user nor NLP
+  // provided an industry, so the engine short-circuited before running
+  // prompts. Render an amber-bordered CTA card instead of bogus benchmarks.
+  if (status === 'needs_industry_confirmation') {
+    return (
+      <>
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.26 }}
+        >
+          <button
+            onClick={() => setModalOpen(true)}
+            className="w-full text-left bg-surface-raised border border-amber-500/40 rounded-xl p-5 hover:border-amber-500/60 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
+                  <AlertTriangle size={18} className="text-amber-400" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-text">AI Visibility</h2>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    Industry not detected.{' '}
+                    <span className="text-amber-400 font-semibold">
+                      Specify industry →
+                    </span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </button>
+        </motion.div>
+        <AIVisibilityModal
+          auditId={auditId}
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          initialIndustry={industry}
         />
       </>
     );
@@ -117,6 +166,7 @@ export function AIVisibilityKpiCard({ auditId }: AIVisibilityKpiCardProps) {
           auditId={auditId}
           open={modalOpen}
           onClose={() => setModalOpen(false)}
+          initialIndustry={industry}
         />
       </>
     );

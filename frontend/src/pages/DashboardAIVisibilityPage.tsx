@@ -9,6 +9,7 @@ import {
   BarChart3,
   Database,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAIVisibilityStore } from '../stores/aiVisibilityStore';
 import { EngineCard } from '../components/ai-visibility/EngineCard';
@@ -63,6 +64,7 @@ export default function DashboardAIVisibilityPage() {
             auditId={auditId}
             open={modalOpen}
             onClose={() => setModalOpen(false)}
+            initialIndustry={data?.industry ?? null}
           />
         )}
       </div>
@@ -84,6 +86,48 @@ export default function DashboardAIVisibilityPage() {
             Querying 4 AI engines with 4 prompts each. This typically takes 30–60 seconds.
           </p>
         </div>
+      </div>
+    );
+  }
+
+  // Needs industry confirmation (Workstream D3) — resolve_industry() returned
+  // (None, None), so the engine skipped prompt generation. The user must
+  // supply an industry before we can run meaningful benchmarks.
+  if (status === 'needs_industry_confirmation') {
+    return (
+      <div className="p-6 lg:p-8 max-w-4xl mx-auto">
+        <div className="bg-surface-raised border border-amber-500/30 rounded-2xl p-8">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+              <AlertTriangle size={22} className="text-amber-400" />
+            </div>
+            <div className="flex-1 space-y-3">
+              <h1 className="text-lg font-bold text-text font-heading">
+                Industry not detected
+              </h1>
+              <p className="text-sm text-text-secondary leading-relaxed max-w-xl">
+                AI Visibility benchmarks need an industry to compare against.
+                We couldn't auto-detect one from your site's content — add one
+                now to continue. Without an industry, results would include
+                irrelevant comparison brands.
+              </p>
+              <button
+                onClick={() => setModalOpen(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-accent hover:bg-accent-hover rounded-xl shadow-glow-accent/20 hover:shadow-glow-accent transition-all"
+              >
+                Specify industry
+              </button>
+            </div>
+          </div>
+        </div>
+        {auditId && (
+          <AIVisibilityModal
+            auditId={auditId}
+            open={modalOpen}
+            onClose={() => setModalOpen(false)}
+            initialIndustry={data?.industry ?? null}
+          />
+        )}
       </div>
     );
   }
@@ -110,6 +154,7 @@ export default function DashboardAIVisibilityPage() {
               auditId={auditId}
               open={modalOpen}
               onClose={() => setModalOpen(false)}
+              initialIndustry={data?.industry ?? null}
             />
           )}
         </div>
@@ -121,7 +166,11 @@ export default function DashboardAIVisibilityPage() {
   const { mentions_database: mentions, live_test: liveTest } = data;
   const hasMentions = mentions.total > 0;
   const hasSov = !!data.share_of_voice;
-  const industryLeaf = data.detected_industry?.split('/').filter(Boolean).pop();
+  // Workstream D3: prefer the resolved industry block; fall back to the
+  // deprecated flat field for older cached blobs.
+  const industryString =
+    data.industry?.value ?? data.detected_industry ?? null;
+  const industryLeaf = industryString?.split('/').filter(Boolean).pop();
   const engines = liveTest.engines;
   const prompts = liveTest.prompts_used;
   const totalPrompts = prompts.length;
@@ -484,6 +533,7 @@ export default function DashboardAIVisibilityPage() {
           auditId={auditId}
           open={modalOpen}
           onClose={() => setModalOpen(false)}
+          initialIndustry={data?.industry ?? null}
         />
       )}
     </div>

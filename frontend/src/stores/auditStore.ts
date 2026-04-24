@@ -15,6 +15,12 @@ interface AuditState {
     tier?: 'free' | 'premium',
     aiVisibilityOptIn?: boolean,
     brandName?: string,
+    /**
+     * Workstream D3: user-declared industry override. When non-empty, flows
+     * into `target_industry` on the audit request body and becomes the
+     * user_declared layer of resolve_industry() on the backend.
+     */
+    targetIndustry?: string,
   ) => Promise<void>;
   loadReport: (jobId: string, pageUrl: string) => Promise<void>;
   fetchReport: (auditId: string) => Promise<void>;
@@ -27,13 +33,18 @@ export const useAuditStore = create<AuditState>((set) => ({
   error: null,
   auditedUrl: '',
 
-  runAudit: async (url, auditType, competitorUrls = [], tier = 'free', aiVisibilityOptIn, brandName) => {
+  runAudit: async (url, auditType, competitorUrls = [], tier = 'free', aiVisibilityOptIn, brandName, targetIndustry) => {
     set({ isLoading: true, error: null, report: null, auditedUrl: url });
 
     let apiUrl = `${apiBase}/api/audit`;
     if (tier === 'premium' && auditType === 'single') apiUrl += '/premium';
     else if (auditType === 'site') apiUrl += '/multi';
     else if (auditType === 'competitive') apiUrl += '/competitive';
+
+    // Workstream D3: normalize targetIndustry — omit the field when the
+    // user left it blank, so the backend resolver falls through to NLP
+    // rather than treating "" as a user-declared empty string.
+    const trimmedIndustry = targetIndustry?.trim();
 
     try {
       let body: Record<string, unknown>;
@@ -43,13 +54,17 @@ export const useAuditStore = create<AuditState>((set) => ({
           competitor_urls: competitorUrls,
           ai_visibility_opt_in: aiVisibilityOptIn ?? true,
           ...(brandName ? { brand_name: brandName } : {}),
+          ...(trimmedIndustry ? { target_industry: trimmedIndustry } : {}),
         };
       } else if (auditType === 'site') {
         body = { url, max_pages: 50 };
       } else if (auditType === 'competitive') {
         body = { primary_url: url, competitor_urls: competitorUrls };
       } else {
-        body = { url };
+        body = {
+          url,
+          ...(trimmedIndustry ? { target_industry: trimmedIndustry } : {}),
+        };
       }
 
       const res = await fetch(apiUrl, {
