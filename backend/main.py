@@ -12,6 +12,7 @@ import os
 import asyncio
 
 from crawler import fetch_page, close_browser
+from bot_detection import detect_bot_challenge
 from html_auditor import run_html_audit
 from structured_data_auditor import run_structured_data_audit
 from css_js_auditor import run_css_js_audit
@@ -165,6 +166,28 @@ def _failed_pillar_result(pillar_name: str, error: Exception) -> dict:
     }
 
 
+def _bot_challenged_pillar_result(bot_result) -> dict:
+    """Return an empty-but-valid auditor result with scan_status='bot_challenged'.
+
+    Used when the homepage fetch returned a Cloudflare/Akamai/DataDome/PerimeterX
+    verification wall (bot_detection.detect_bot_challenge). The 10 auditors are
+    skipped — running them on a decoy challenge page produces confidently wrong
+    scores (see sched.com incident 2026-04-23: 100/100 overall, NLP entities
+    "security verification"/"bots"/"performance"). Mirrors _failed_pillar_result
+    for compile_scores compatibility; the 'bot_challenged' scan_status is non-'ok'
+    so coverage renormalization excludes the pillar automatically.
+    """
+    return {
+        "checks": {},
+        "positive_findings": [],
+        "findings": [],
+        "scan_status": "bot_challenged",
+        "scan_error": bot_result.reason,
+        "bot_challenge_vendor": bot_result.vendor,
+        "bot_challenge_signals": bot_result.signals,
+    }
+
+
 def _safe_run_pillar(pillar_name: str, fn, *args, **kwargs) -> dict:
     try:
         return fn(*args, **kwargs)
@@ -219,41 +242,77 @@ async def perform_audit(request: AuditRequest):
     tier = request.tier if request.tier in ("free", "premium") else "free"
     logger.info(f"Starting {tier} audit for {url}")
     try:
-        html_content, soup = await fetch_page(url)
+        fetch_result = await fetch_page(url)
+        html_content = fetch_result.html
+        soup = fetch_result.soup
+
+        # Bot-challenge detection — see perform_premium_audit for the full
+        # rationale. If the homepage fetch returned a verification wall, the
+        # 10 auditors would score a decoy; short-circuit with bot_challenged
+        # placeholders so compile_scores suppresses overall_score to None.
+        bot_result = detect_bot_challenge(
+            soup=soup,
+            html=html_content,
+            headers=fetch_result.headers,
+            cookies=fetch_result.cookies,
+        )
+        if bot_result.detected:
+            logger.warning(
+                "Bot challenge detected for %s (vendor=%s, signals=%s, reason=%s)",
+                url, bot_result.vendor, bot_result.signals, bot_result.reason,
+            )
 
         # Run the 10 deterministic pillars (always, regardless of tier).
         # Each is wrapped so one pillar crashing doesn't lose the other nine —
         # compile_scores drops failed pillars from the weighted average.
-        logger.info(f"Running HTML audit for {url}")
-        html_res = _safe_run_pillar("semantic_html", run_html_audit, soup, html_content)
+        if bot_result.detected:
+            html_res = _bot_challenged_pillar_result(bot_result)
+            sd_res = _bot_challenged_pillar_result(bot_result)
+            css_js_res = _bot_challenged_pillar_result(bot_result)
+            aeo_res = _bot_challenged_pillar_result(bot_result)
+            rag_res = _bot_challenged_pillar_result(bot_result)
+            agent_res = _bot_challenged_pillar_result(bot_result)
+            data_res = _bot_challenged_pillar_result(bot_result)
+            il_res = _bot_challenged_pillar_result(bot_result)
+            a11y_res = _bot_challenged_pillar_result(bot_result)
+        else:
+            logger.info(f"Running HTML audit for {url}")
+            html_res = _safe_run_pillar("semantic_html", run_html_audit, soup, html_content)
 
-        logger.info(f"Running Structured Data audit for {url}")
-        sd_res = _safe_run_pillar("structured_data", run_structured_data_audit, html_content, url)
+            logger.info(f"Running Structured Data audit for {url}")
+            sd_res = _safe_run_pillar("structured_data", run_structured_data_audit, html_content, url)
 
-        logger.info(f"Running CSS/JS audit for {url}")
-        css_js_res = _safe_run_pillar("css_js", run_css_js_audit, soup, html_content)
+            logger.info(f"Running CSS/JS audit for {url}")
+            css_js_res = _safe_run_pillar("css_js", run_css_js_audit, soup, html_content)
 
-        logger.info(f"Running AEO content audit for {url}")
-        aeo_res = _safe_run_pillar("aeo_content", run_aeo_content_audit, soup, html_content)
+            logger.info(f"Running AEO content audit for {url}")
+            aeo_res = _safe_run_pillar("aeo_content", run_aeo_content_audit, soup, html_content)
 
-        logger.info(f"Running RAG Readiness audit for {url}")
-        rag_res = _safe_run_pillar("rag_readiness", run_rag_readiness_audit, soup, html_content)
+            logger.info(f"Running RAG Readiness audit for {url}")
+            rag_res = _safe_run_pillar("rag_readiness", run_rag_readiness_audit, soup, html_content)
 
-        logger.info(f"Running Agentic Protocol audit for {url}")
-        agent_res = _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url)
+            logger.info(f"Running Agentic Protocol audit for {url}")
+            agent_res = _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url)
 
-        logger.info(f"Running Data Integrity audit for {url}")
-        data_res = _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content)
+            logger.info(f"Running Data Integrity audit for {url}")
+            data_res = _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content)
 
-        logger.info(f"Running Internal Linking audit for {url}")
-        il_res = _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, str(request.url), site_data=None)
+            logger.info(f"Running Internal Linking audit for {url}")
+            il_res = _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, str(request.url), site_data=None)
 
-        logger.info(f"Running Accessibility audit for {url}")
-        a11y_res = await _safe_run_pillar_async("accessibility", run_accessibility_audit, url)
+            logger.info(f"Running Accessibility audit for {url}")
+            a11y_res = await _safe_run_pillar_async("accessibility", run_accessibility_audit, url)
 
         logger.info("Compiling scores and report")
         scores = compile_scores(html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, il_res)
         report = generate_report(url, html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, scores, il_res, tier=tier)
+        report["bot_challenge"] = {
+            "detected": True,
+            "vendor": bot_result.vendor,
+            "signals": bot_result.signals,
+            "reason": bot_result.reason,
+            "confidence": bot_result.confidence,
+        } if bot_result.detected else None
 
         # Premium modules will be added in later sprints (executive summary, fix KB, etc.)
 
@@ -308,24 +367,66 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
     logger.info(f"URL: {url}, audit_id={audit_id}")
     logger.info(f"Config: DataForSEO={is_dataforseo_configured()}, NLP={is_nlp_configured()}, competitors={len(request.competitor_urls)}")
     try:
-        html_content, soup = await fetch_page(url)
+        fetch_result = await fetch_page(url)
+        html_content = fetch_result.html
+        soup = fetch_result.soup
         logger.info(f"Page fetched: {len(html_content)} bytes")
 
-        # ── Phase 1: 10-pillar deterministic audit (always runs) ──
+        # Bot-challenge detection — if the homepage Playwright fetch returned a
+        # Cloudflare/Akamai/DataDome/PerimeterX verification page instead of
+        # real content, the 10 auditors would score a decoy and produce
+        # confidently wrong results (see sched.com incident 2026-04-23).
+        # The DFS site-wide crawl is architecturally independent of this fetch
+        # (link_graph / TIPR / topic_clustering consume DFS data), so it still
+        # runs — the user gets partial results rather than a total failure.
+        bot_result = detect_bot_challenge(
+            soup=soup,
+            html=html_content,
+            headers=fetch_result.headers,
+            cookies=fetch_result.cookies,
+        )
+        if bot_result.detected:
+            logger.warning(
+                "Bot challenge detected for %s (vendor=%s, signals=%s, reason=%s)",
+                url, bot_result.vendor, bot_result.signals, bot_result.reason,
+            )
+
+        # ── Phase 1: 10-pillar deterministic audit ──
         # Per-pillar exception isolation; see _safe_run_pillar docstring.
-        html_res = _safe_run_pillar("semantic_html", run_html_audit, soup, html_content)
-        sd_res = _safe_run_pillar("structured_data", run_structured_data_audit, html_content, url)
-        css_js_res = _safe_run_pillar("css_js", run_css_js_audit, soup, html_content)
-        aeo_res = _safe_run_pillar("aeo_content", run_aeo_content_audit, soup, html_content)
-        rag_res = _safe_run_pillar("rag_readiness", run_rag_readiness_audit, soup, html_content)
-        agent_res = _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url)
-        data_res = _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content)
-        il_res = _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, url, site_data=None)
-        a11y_res = await _safe_run_pillar_async("accessibility", run_accessibility_audit, url)
+        # When bot_challenged, pillars short-circuit to placeholders with
+        # scan_status='bot_challenged' so compile_scores drops them via coverage
+        # renormalization (overall_score → None).
+        if bot_result.detected:
+            html_res = _bot_challenged_pillar_result(bot_result)
+            sd_res = _bot_challenged_pillar_result(bot_result)
+            css_js_res = _bot_challenged_pillar_result(bot_result)
+            aeo_res = _bot_challenged_pillar_result(bot_result)
+            rag_res = _bot_challenged_pillar_result(bot_result)
+            agent_res = _bot_challenged_pillar_result(bot_result)
+            data_res = _bot_challenged_pillar_result(bot_result)
+            il_res = _bot_challenged_pillar_result(bot_result)
+            a11y_res = _bot_challenged_pillar_result(bot_result)
+        else:
+            html_res = _safe_run_pillar("semantic_html", run_html_audit, soup, html_content)
+            sd_res = _safe_run_pillar("structured_data", run_structured_data_audit, html_content, url)
+            css_js_res = _safe_run_pillar("css_js", run_css_js_audit, soup, html_content)
+            aeo_res = _safe_run_pillar("aeo_content", run_aeo_content_audit, soup, html_content)
+            rag_res = _safe_run_pillar("rag_readiness", run_rag_readiness_audit, soup, html_content)
+            agent_res = _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url)
+            data_res = _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content)
+            il_res = _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, url, site_data=None)
+            a11y_res = await _safe_run_pillar_async("accessibility", run_accessibility_audit, url)
 
         scores = compile_scores(html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, il_res)
         report = generate_report(url, html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, scores, il_res, tier="premium")
-        logger.info(f"10-pillar audit complete: score={report.get('overall_score')}")
+        report["bot_challenge"] = {
+            "detected": True,
+            "vendor": bot_result.vendor,
+            "signals": bot_result.signals,
+            "reason": bot_result.reason,
+            "confidence": bot_result.confidence,
+        } if bot_result.detected else None
+        logger.info(f"10-pillar audit complete: score={report.get('overall_score')}, bot_challenged={bot_result.detected}")
 
         # ── Initialize all premium keys with null defaults ──
         # Frontend checks these keys; null = "not available", missing = crash
