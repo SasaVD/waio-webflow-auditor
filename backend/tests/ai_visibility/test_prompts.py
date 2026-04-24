@@ -83,11 +83,32 @@ def test_fallback_when_no_top_entity():
         assert len(p.text) > 10
 
 
-def test_fallback_when_no_industry():
-    prompts = build_prompts(
-        industry=None,
-        top_entity="web design",
-        brand_name="Studio X",
-    )
-    assert len(prompts) == 4
-    assert "Studio X" in prompts[3].text
+def test_build_prompts_raises_when_industry_is_none():
+    """Workstream D3: build_prompts must refuse to synthesize a fallback
+    industry. The caller (ai_visibility.engine.run_ai_visibility_analysis)
+    is responsible for calling resolve_industry() first and short-circuiting
+    on (None, None). If build_prompts is ever called with industry=None,
+    we want a loud error, not a silent "business services" leaf that
+    produces misleading benchmarks (sched.com incident 2026-04-23)."""
+    import pytest
+
+    with pytest.raises(ValueError, match="industry"):
+        build_prompts(
+            industry=None,
+            top_entity="web design",
+            brand_name="Studio X",
+        )
+
+
+def test_build_prompts_raises_when_industry_is_empty_string():
+    """Same contract as above for empty strings — the resolver in engine.py
+    normalizes empty/whitespace to None; if something bypasses it and hands
+    build_prompts an empty string, we still refuse to fabricate a fallback."""
+    import pytest
+
+    with pytest.raises(ValueError, match="industry"):
+        build_prompts(
+            industry="",
+            top_entity="web design",
+            brand_name="Studio X",
+        )

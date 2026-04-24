@@ -29,14 +29,69 @@ def _resolve_status(engine_results: dict) -> str:
     return "failed"
 
 
+def resolve_industry(
+    *,
+    target_industry: str | None,
+    detected_industry: str | None,
+) -> tuple[str | None, str | None]:
+    """Resolve the industry + source used for AI Visibility prompt generation.
+
+    Priority (documented contract — Workstream D3.0, do NOT add fallback layers):
+
+      1. ``target_industry`` (user-declared, from request.target_industry or
+         report_json.audit_config.target_industry)
+         → returns ``(target_industry, "user_declared")``
+      2. ``detected_industry`` (NLP aggregation across crawled pages)
+         → returns ``(detected_industry, "nlp_detected")``
+      3. Neither present
+         → returns ``(None, None)`` — caller renders "Needs attention" state
+         and skips prompt generation entirely.
+
+    We deliberately do NOT fall back to a generic "business services" leaf
+    when both are None. Silent fallback caused incident 2026-04-23 (sched.com
+    event-management SaaS was benchmarked against Accenture / McKinsey /
+    Deloitte because detected_industry was None and the fallback kicked in).
+
+    Args:
+        target_industry: User-declared override. ``None``, empty string,
+            and whitespace-only are all treated as "not provided".
+        detected_industry: NLP-detected classification. Same empty/whitespace
+            handling as ``target_industry``.
+
+    Returns:
+        A 2-tuple ``(value, source)`` where ``source`` is one of
+        ``"user_declared"``, ``"nlp_detected"``, or ``None``.
+    """
+    user_val = (target_industry or "").strip()
+    if user_val:
+        return user_val, "user_declared"
+
+    nlp_val = (detected_industry or "").strip()
+    if nlp_val:
+        return nlp_val, "nlp_detected"
+
+    return None, None
+
+
 async def run_ai_visibility_analysis(
     audit_id: str,
     brand_override: str | None = None,
+    target_industry: str | None = None,
 ) -> None:
     """Run the full AI Visibility pipeline and write results to the audit report.
 
     This is designed to be called via asyncio.create_task() — it manages its
     own DB writes and error handling. Returns None; results go to report_json.
+
+    Args:
+        audit_id: Audit to analyse.
+        brand_override: Optional user-provided brand name override (skips NLP
+            brand extraction when set).
+        target_industry: Optional user-declared industry override (Workstream
+            D3). Takes precedence over NLP ``detected_industry``. When both
+            this and the NLP value are empty, the engine writes a
+            ``last_computed_status="needs_industry_confirmation"`` blob and
+            short-circuits — no prompts are generated, no DFS calls are made.
     """
     # Import DB functions here to avoid circular imports at module level
     from db_router import get_audit_by_id, update_audit_report
@@ -69,6 +124,20 @@ async def run_ai_visibility_analysis(
             if existing_viz.get("brand_name_source") == "override":
                 brand_override = existing_viz.get("brand_name")
 
+        # Workstream D3: resolve the industry through the priority ladder
+        # (user_declared → nlp_detected → None). If the caller passed an
+        # explicit target_industry, use it; otherwise check the stored audit
+        # record for a previously-saved user target.
+        if not target_industry:
+            existing_viz = report.get("ai_visibility") or {}
+            existing_industry = existing_viz.get("industry") or {}
+            # New-shape storage (Contract 2): ai_visibility.industry.user_provided
+            target_industry = (
+                existing_industry.get("user_provided")
+                or report.get("target_industry")
+                or (report.get("audit_config") or {}).get("target_industry")
+            )
+
         # Stage 1: Resolve brand
         try:
             brand_info = resolve_brand(brand_override, nlp_entities)
@@ -93,8 +162,47 @@ async def run_ai_visibility_analysis(
             co_mention_domains=None,  # Tier 3 populated after mentions fetch
         )
 
-        # Stage 3: Build prompts
-        detected_industry = detected_industry_raw
+        # Stage 3: Resolve industry + build prompts
+        # Workstream D3 (Contract 5): priority user_declared → nlp_detected → None.
+        # resolve_industry returns (None, None) when both inputs are empty —
+        # we MUST short-circuit here and emit a "needs_industry_confirmation"
+        # status rather than letting build_prompts fabricate a fallback leaf.
+        industry_value, industry_source = resolve_industry(
+            target_industry=target_industry,
+            detected_industry=detected_industry_raw,
+        )
+        industry_block = {
+            "value": industry_value,
+            "source": industry_source,
+            "user_provided": (target_industry or None) if (target_industry or "").strip() else None,
+        }
+
+        if industry_value is None:
+            logger.info(
+                f"AI Visibility: industry unresolved for {audit_id} "
+                f"(target_industry={target_industry!r}, "
+                f"detected_industry={detected_industry_raw!r}). "
+                "Writing needs_industry_confirmation status and skipping prompts."
+            )
+            existing_viz = report.get("ai_visibility") or {}
+            await update_audit_report(audit_id, {
+                "ai_visibility": {
+                    "last_computed_at": datetime.now(timezone.utc).isoformat(),
+                    "last_computed_status": "needs_industry_confirmation",
+                    "run_count": existing_viz.get("run_count", 0) or 0,
+                    "brand_name": brand_info.name,
+                    "brand_name_source": brand_info.source,
+                    "industry": industry_block,
+                    # Deprecated: keep for a release or two for backwards-compat
+                    # with older dashboards that read detected_industry directly.
+                    # TODO: remove after frontend fully migrated to industry.value.
+                    "detected_industry": detected_industry_raw,
+                    "cumulative_cost_usd": existing_viz.get("cumulative_cost_usd", 0) or 0,
+                }
+            })
+            return
+
+        detected_industry = industry_value  # legacy local name, used below
         # sanitize_entity_name returns None if the top_entity is pure
         # adjacent-token repetition or duplicates the industry leaf —
         # build_prompts already treats None as "fall back to industry leaf".
@@ -146,6 +254,13 @@ async def run_ai_visibility_analysis(
             "run_count": (report.get("ai_visibility", {}).get("run_count", 0) or 0) + 1,
             "brand_name": brand_info.name,
             "brand_name_source": brand_info.source,
+            # Workstream D3 Contract 2: resolved industry block. Frontend reads
+            # industry.value + industry.source to branch between the normal
+            # tile and the "Needs attention" card.
+            "industry": industry_block,
+            # Deprecated: retained for backwards-compat with older dashboards
+            # / exports that still read detected_industry directly. Remove
+            # once all readers have been migrated to ai_visibility.industry.value.
             "detected_industry": detected_industry,
             "competitors": competitors.to_dict(),
             "mentions_database": mentions.to_dict(),

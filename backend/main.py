@@ -102,6 +102,11 @@ app.include_router(auth_router)
 class AuditRequest(BaseModel):
     url: HttpUrl
     tier: str = "free"
+    # Workstream D3: optional user-declared industry override. Kept on the
+    # free-tier request for symmetry — free audits don't trigger AI Visibility
+    # today, but storing the user's answer here means we can honor it if they
+    # later upgrade to premium or if a future feature surfaces it.
+    target_industry: str | None = None
 
 class MultiAuditRequest(BaseModel):
     url: HttpUrl
@@ -119,6 +124,12 @@ class PremiumAuditRequest(BaseModel):
     nlp_sentiment: bool = False
     ai_visibility_opt_in: bool = True
     brand_name: str | None = None
+    # Workstream D3: user-declared industry override. When non-empty, takes
+    # precedence over NLP detected_industry via resolve_industry(). When
+    # empty and NLP also yields no industry, AI Visibility short-circuits
+    # with last_computed_status="needs_industry_confirmation" rather than
+    # silently falling back to "business services" (see 2026-04-23 incident).
+    target_industry: str | None = None
 
 class ExportRequest(BaseModel):
     report: dict
@@ -701,6 +712,13 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
         report["ai_visibility_opt_in"] = request.ai_visibility_opt_in
         if request.brand_name:
             report["ai_visibility_brand_name"] = request.brand_name
+        # Workstream D3: user-declared industry travels alongside the brand
+        # override so the background AI Visibility task can read it when it
+        # finally fires (minutes after the initial audit returns).
+        audit_config = report.setdefault("audit_config", {})
+        if request.target_industry and request.target_industry.strip():
+            audit_config["target_industry"] = request.target_industry.strip()
+            report["target_industry"] = request.target_industry.strip()
 
         await save_audit_history(
             url, audit_type,
@@ -1990,10 +2008,18 @@ async def _enrich_report_from_crawl(
                     aiv_rpt = json.loads(aiv_rpt)
                 if aiv_rpt.get("ai_visibility_opt_in"):
                     brand_override = aiv_rpt.get("ai_visibility_brand_name")
+                    # Workstream D3: thread the user's declared industry
+                    # through so the engine can resolve it via
+                    # resolve_industry() without re-reading the DB record.
+                    target_industry = (
+                        aiv_rpt.get("target_industry")
+                        or (aiv_rpt.get("audit_config") or {}).get("target_industry")
+                    )
                     asyncio.create_task(
                         run_ai_visibility_analysis(
                             audit_id=str(audit_id),
                             brand_override=brand_override,
+                            target_industry=target_industry,
                         )
                     )
                     logger.info(f"AI Visibility sibling task launched for audit {audit_id}")
@@ -2841,16 +2867,58 @@ async def recompute_ai_visibility(audit_id: str, body: dict = Body(...)):
 
     brand_name = body.get("brand_name", "").strip() if body.get("brand_name") else None
 
-    # Write running state immediately so poller sees it
+    # Workstream D3 (Contract 4): accept user-declared industry override
+    # so the modal can confirm/edit it before re-running. Empty string and
+    # whitespace-only are normalized to None so resolve_industry() falls
+    # through to the NLP detected value (or the "needs attention" state).
+    raw_target_industry = body.get("target_industry")
+    target_industry = (
+        raw_target_industry.strip()
+        if isinstance(raw_target_industry, str) and raw_target_industry.strip()
+        else None
+    )
+
+    # Write running state immediately so poller sees it. If the user supplied
+    # target_industry, persist it now so page reloads during the run show
+    # the user's chosen value (industry.user_provided round-trips even if
+    # the engine hasn't produced the final blob yet).
     from datetime import datetime as dt, timezone as tz
     started_at = dt.now(tz.utc).isoformat()
-    await update_audit_report(audit_id, {
-        "ai_visibility": {
-            **existing_viz,
-            "last_computed_status": "running",
-            "started_at": started_at,
+    running_blob = {
+        **existing_viz,
+        "last_computed_status": "running",
+        "started_at": started_at,
+    }
+    if target_industry is not None:
+        existing_industry_block = existing_viz.get("industry") or {}
+        running_blob["industry"] = {
+            "value": target_industry,
+            "source": "user_declared",
+            "user_provided": target_industry,
+            # Preserve any prior resolution so the UI has something to show
+            # if the user cancels mid-recompute.
+            **{
+                k: v for k, v in existing_industry_block.items()
+                if k not in {"value", "source", "user_provided"}
+            },
         }
+    await update_audit_report(audit_id, {
+        "ai_visibility": running_blob,
     })
+
+    # Persist target_industry on the report_json audit_config so the
+    # background engine task can read it on the next cycle, and so
+    # subsequent page loads see the user's choice (Contract 4: round-trip).
+    if target_industry is not None:
+        try:
+            audit_config = dict(report.get("audit_config") or {})
+            audit_config["target_industry"] = target_industry
+            await update_audit_report(audit_id, {
+                "audit_config": audit_config,
+                "target_industry": target_industry,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to persist target_industry: {e}")
 
     # Save brand override if provided
     if brand_name:
@@ -2866,9 +2934,13 @@ async def recompute_ai_visibility(audit_id: str, body: dict = Body(...)):
         except Exception as e:
             logger.warning(f"Failed to save brand_name_override: {e}")
 
-    # Fire background task
+    # Fire background task — threads target_industry through to the resolver.
     asyncio.create_task(
-        run_ai_visibility_analysis(audit_id, brand_override=brand_name)
+        run_ai_visibility_analysis(
+            audit_id,
+            brand_override=brand_name,
+            target_industry=target_industry,
+        )
     )
 
     return {
