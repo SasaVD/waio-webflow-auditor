@@ -12,13 +12,16 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useAIVisibilityStore } from '../stores/aiVisibilityStore';
+import { useAuditStore } from '../stores/auditStore';
 import { EngineCard } from '../components/ai-visibility/EngineCard';
 import { ZeroMentionsCard } from '../components/ai-visibility/ZeroMentionsCard';
 import { AIVisibilityModal } from '../components/ai-visibility/AIVisibilityModal';
+import { BotChallengeBanner } from '../components/audit/BotChallengeBanner';
 
 export default function DashboardAIVisibilityPage() {
   const { auditId } = useParams<{ auditId: string }>();
   const { data, status, fetchStatus } = useAIVisibilityStore();
+  const report = useAuditStore((s) => s.report);
   const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
@@ -40,7 +43,8 @@ export default function DashboardAIVisibilityPage() {
   // Not computed state
   if (status === 'not_computed') {
     return (
-      <div className="p-6 lg:p-8 max-w-4xl mx-auto">
+      <div className="p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
+        <BotChallengeBanner report={report} />
         <div className="text-center py-16">
           <div className="w-14 h-14 rounded-2xl bg-accent/10 flex items-center justify-center mx-auto mb-4">
             <Eye size={24} className="text-accent" />
@@ -74,7 +78,8 @@ export default function DashboardAIVisibilityPage() {
   // Running state
   if (status === 'running') {
     return (
-      <div className="p-6 lg:p-8 max-w-4xl mx-auto">
+      <div className="p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
+        <BotChallengeBanner report={report} />
         <div className="text-center py-16">
           <div className="w-14 h-14 rounded-2xl bg-accent/10 flex items-center justify-center mx-auto mb-4">
             <Loader2 size={24} className="text-accent animate-spin" />
@@ -95,7 +100,8 @@ export default function DashboardAIVisibilityPage() {
   // supply an industry before we can run meaningful benchmarks.
   if (status === 'needs_industry_confirmation') {
     return (
-      <div className="p-6 lg:p-8 max-w-4xl mx-auto">
+      <div className="p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
+        <BotChallengeBanner report={report} />
         <div className="bg-surface-raised border border-amber-500/30 rounded-2xl p-8">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center flex-shrink-0">
@@ -135,7 +141,8 @@ export default function DashboardAIVisibilityPage() {
   // Failed — either no data at all, or data without the core result shape
   if (!data || !data.mentions_database || !data.live_test) {
     return (
-      <div className="p-6 lg:p-8 max-w-4xl mx-auto">
+      <div className="p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
+        <BotChallengeBanner report={report} />
         <div className="text-center py-16">
           <h1 className="text-xl font-bold text-text font-heading mb-2">
             Analysis Failed
@@ -180,6 +187,11 @@ export default function DashboardAIVisibilityPage() {
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+      {/* Workstream D5: Bot Challenge Banner — when the homepage was bot-challenged,
+          AI Visibility may still have run (or skipped); either way, surface the
+          context at the top of the page so the data is interpreted correctly. */}
+      <BotChallengeBanner report={report} />
+
       {/* ── Section 1: Header + metadata ── */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}

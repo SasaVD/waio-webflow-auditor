@@ -35,6 +35,8 @@ import { ExportButton } from '../components/export/ExportButton';
 import { PILLAR_LABELS, PILLAR_SHORT_LABELS } from '../constants/pillarLabels';
 import { AIVisibilityKpiCard } from '../components/ai-visibility/AIVisibilityKpiCard';
 import { ContentOptimizerKpiCard } from '../components/content-optimizer/ContentOptimizerKpiCard';
+import { BotChallengeBanner } from '../components/audit/BotChallengeBanner';
+import { ScanStatsStrip } from '../components/audit/ScanStatsStrip';
 
 /* ─── Helpers ─── */
 const scoreColor = (score: number): string => {
@@ -348,6 +350,11 @@ export default function DashboardOverviewPage() {
         </div>
       </motion.div>
 
+      {/* Workstream D5: Bot Challenge Banner — when Cloudflare/Akamai/etc.
+          served a verification wall instead of real content. Sits above the
+          partial-coverage chip because it explains *why* coverage is partial. */}
+      <BotChallengeBanner report={report} />
+
       {/* Coverage Disclosure Chip — shown whenever any pillar failed */}
       {partialCoverage && (
         <motion.div
@@ -414,6 +421,10 @@ export default function DashboardOverviewPage() {
           color="text-success"
         />
       </div>
+
+      {/* Workstream D5: Scan Stats Strip — one-line audit-coverage summary.
+          Renders amber styling when a bot challenge is detected. */}
+      <ScanStatsStrip report={report} />
 
       {/* Radar Chart + Top Issues */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
