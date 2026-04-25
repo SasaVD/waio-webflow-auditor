@@ -101,6 +101,17 @@ PILLAR_DESCRIPTIONS = {
     "internal_linking": "Maps link graph health, orphans, anchor quality, and link depth.",
 }
 
+# Bot-challenge vendor → display label. Single source of truth, mirrored from
+# the dashboard's BotChallengeBanner (Workstream D5). Kept in sync intentionally;
+# update both places together.
+_BOT_VENDOR_DISPLAY = {
+    "cloudflare": "Cloudflare",
+    "akamai": "Akamai",
+    "datadome": "DataDome",
+    "perimeterx": "PerimeterX",
+    "unknown": "an unidentified bot protection service",
+}
+
 
 # ---------------------------------------------------------------------------
 # Color helpers
@@ -262,6 +273,15 @@ def _render_pillar_bar_chart_svg(pillar_groups: list[dict]) -> str:
                 f'<text x="{bar_left + bar_w + 8}" y="{y + 18}" '
                 f'font-size="10" font-style="italic" fill="#94A3B8">Scan incomplete</text>'
             )
+            # Workstream D6: render the per-pillar reason line under the main
+            # "Scan incomplete" caption when present (bot_challenged-specific).
+            reason_line = p.get("reason_line")
+            if reason_line:
+                svg_parts.append(
+                    f'<text x="{bar_left + bar_w + 8}" y="{y + 30}" '
+                    f'font-size="8" font-style="italic" fill="#94A3B8">'
+                    f'{_html.escape(reason_line)}</text>'
+                )
             # Consume findings_count so the subsequent block doesn't render it.
             findings_count = 0
         else:
@@ -440,6 +460,44 @@ def markdown_to_html(md: str) -> str:
 # Section context builders
 # ---------------------------------------------------------------------------
 
+def _build_cover_bot_challenge_block(report: dict) -> dict | None:
+    """Cover-page bot-challenge callout. Returns None when not detected.
+
+    Workstream D6: when the auditor pipeline detected a bot challenge during
+    the fetch (Cloudflare, Akamai, etc.), the cover page must explain *why*
+    the scan is incomplete rather than show the generic partial-coverage
+    line. This block is rendered in place of `coverage_disclosure` (the
+    bot challenge is the bigger explanation).
+    """
+    bc = report.get("bot_challenge")
+    if not isinstance(bc, dict) or not bc.get("detected"):
+        return None
+    raw_vendor = (bc.get("vendor") or "unknown").lower()
+    vendor_display = _BOT_VENDOR_DISPLAY.get(raw_vendor, _BOT_VENDOR_DISPLAY["unknown"])
+    headline = f"Scan incomplete — site blocked by {vendor_display} bot protection."
+    body = (
+        "The full 10-pillar analysis could not run. "
+        "See appendix for detected signals."
+    )
+    confidence = bc.get("confidence")
+    try:
+        confidence = float(confidence) if confidence is not None else None
+    except (TypeError, ValueError):
+        confidence = None
+    signals = bc.get("signals") or []
+    if not isinstance(signals, list):
+        signals = []
+    return {
+        "detected": True,
+        "vendor_display": vendor_display,
+        "headline": headline,
+        "body": body,
+        "signals": signals,
+        "confidence": confidence,
+        "reason": bc.get("reason") or "",
+    }
+
+
 def _build_cover(report: dict) -> dict:
     url = report.get("url") or report.get("primary_url") or ""
     raw_score = report.get("overall_score")
@@ -492,6 +550,9 @@ def _build_cover(report: dict) -> dict:
         "tier": tier,
         "timestamp": ts,
         "score_ring_svg": _render_score_ring_svg(overall_score),
+        # Workstream D6: cover-page bot-challenge callout. None when not detected.
+        # When set, the template renders this in place of coverage_disclosure.
+        "bot_challenge": _build_cover_bot_challenge_block(report),
     }
 
 
@@ -529,6 +590,10 @@ def _build_pillars(report: dict) -> list[dict]:
                 display_label = cat.get("label") or "Not scored"
                 display_color = _score_color(score_int)
                 display_score_text = str(score_int)
+            # Workstream D6: distinguish bot_challenged from generic auditor
+            # failures (failed/incomplete) with a secondary reason line under
+            # the muted "Scan incomplete" main render. Only set for bot_challenged.
+            reason_line = "Bot protection detected" if scan_status == "bot_challenged" else None
             pillar_cards.append({
                 "key": key,
                 "label": label,
@@ -540,6 +605,7 @@ def _build_pillars(report: dict) -> list[dict]:
                 "color": display_color,
                 "initial": label[:1],
                 "findings_count": findings_count if scan_status == "ok" else 0,
+                "reason_line": reason_line,
             })
         result.append({
             "name": group["name"],
@@ -548,6 +614,12 @@ def _build_pillars(report: dict) -> list[dict]:
             "cards": pillar_cards,
         })
     return result
+
+
+# Workstream D6: public alias matching the dashboard naming convention. Tests
+# and external callers can reference _build_pillar_scorecard; the internal
+# rendering path continues to use _build_pillars.
+_build_pillar_scorecard = _build_pillars
 
 
 _ZERO_OUTBOUND_REWRITES = [
@@ -1988,7 +2060,15 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <div class="eyebrow-plain">Overall Audit Score</div>
         <div class="big">{{ cover.overall_label }}</div>
         <div class="small muted" style="margin-top: 6pt;">10 deterministic pillars · evidence-based scoring</div>
-        {% if cover.coverage_disclosure %}
+        {# Workstream D6: bot-challenge callout takes priority over the generic
+           coverage_disclosure. When both are set, the bot challenge IS the
+           explanation and the coverage line would just repeat the math. #}
+        {% if cover.bot_challenge %}
+          <div class="cover-bot-challenge" style="margin-top: 8pt; padding: 10pt 12pt; background: #FEE2E2; color: #7F1D1D; border-radius: 6pt; border-left: 3pt solid #DC2626;">
+            <div style="font-weight: 700; font-size: 11pt;">⚠ {{ cover.bot_challenge.headline }}</div>
+            <div style="font-weight: 500; margin-top: 4pt; font-size: 10pt;">{{ cover.bot_challenge.body }}</div>
+          </div>
+        {% elif cover.coverage_disclosure %}
           <div class="small" style="margin-top: 8pt; padding: 6pt 10pt; background: #FEF3C7; color: #92400E; border-radius: 4pt; font-weight: 600;">
             {{ cover.coverage_disclosure }}
           </div>
@@ -2509,6 +2589,49 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="title">Zero AI guessing</div>
     <div>None of the 10 pillars calls an LLM. AI enrichment layers (NLP entities, AI Visibility) are separate from the deterministic pillars that drive the overall score — and are clearly labeled as such throughout this report.</div>
   </div>
+
+  {# Workstream D6: bot-challenge appendix. Lists vendor, signals, confidence,
+     and reason when the auditor detected a bot challenge during fetch. #}
+  {% if cover.bot_challenge %}
+    <h3 style="margin-top: 18pt;">Appendix — Bot Protection Detection</h3>
+    <div class="infobox warn" style="background: #FEE2E2; border-color: #DC2626;">
+      <div class="title" style="color: #7F1D1D;">⚠ Scan blocked by {{ cover.bot_challenge.vendor_display }}</div>
+      <div class="small" style="margin-top: 4pt;">
+        The auditor was served a bot challenge instead of the expected page content.
+        The 10 deterministic pillars could not run against the rendered HTML, so per-pillar
+        scores are unscored.
+      </div>
+    </div>
+    <table style="margin-top: 10pt;">
+      <thead><tr><th>Field</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Vendor</strong></td><td>{{ cover.bot_challenge.vendor_display }}</td></tr>
+        <tr>
+          <td><strong>Detection signals</strong></td>
+          <td class="mono small">
+            {% if cover.bot_challenge.signals %}
+              {{ cover.bot_challenge.signals | join(", ") }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Confidence</strong></td>
+          <td>
+            {% if cover.bot_challenge.confidence is not none %}
+              {{ "%.0f"|format(cover.bot_challenge.confidence * 100) }}%
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+        {% if cover.bot_challenge.reason %}
+          <tr><td><strong>Reason</strong></td><td class="small">{{ cover.bot_challenge.reason }}</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  {% endif %}
 
   <div class="footer-sig">
     Veza Digital · WAIO Audit Engine · {{ current_year }}
