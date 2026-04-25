@@ -8,6 +8,11 @@ from ai_visibility.schema import BrandInfo, BrandExtractionError
 
 
 def test_override_always_wins():
+    """Override beats NLP entities. After Workstream D2 the discriminator
+    is one of {kg_mid, curated_list, override_unverified} — the deprecated
+    'override' source string was removed. Without an nlp_client and an
+    empty curated list, an override falls through to override_unverified.
+    """
     nlp_entities = [
         {"name": "Belt Creative", "type": "ORGANIZATION", "salience": 0.82},
         {"name": "Webflow", "type": "ORGANIZATION", "salience": 0.45},
@@ -15,9 +20,10 @@ def test_override_always_wins():
     result = resolve_brand(
         brand_override="Veza Digital",
         nlp_entities=nlp_entities,
+        curated_brands={},
     )
     assert result.name == "Veza Digital"
-    assert result.source == "override"
+    assert result.source == "override_unverified"
     assert result.salience is None
 
 

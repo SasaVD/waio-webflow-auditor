@@ -1029,8 +1029,16 @@ def _build_ai_visibility(report: dict) -> dict:
         )
 
     # Translate internal source keys into client-facing labels.
+    # Workstream D2 (2026-04-24): the single "override" discriminator was
+    # replaced by three confidence tiers — kg_mid (KG-validated, highest),
+    # curated_list (whitelist), override_unverified (fallback, lowest).
+    # All three render the same client-facing label here; the dashboard
+    # is the surface that exposes the underlying confidence tier to users.
     brand_source_labels = {
-        "override": "manually verified",
+        "kg_mid": "verified via Knowledge Graph",
+        "curated_list": "manually verified",
+        "override_unverified": "manually entered (unverified)",
+        "override": "manually verified",  # legacy persisted records
         "manual": "manually verified",
         "user": "manually verified",
         "nlp": "auto-detected from site content",

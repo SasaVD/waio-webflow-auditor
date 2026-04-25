@@ -18,6 +18,91 @@ from .cost_tracker import CostTracker
 
 logger = logging.getLogger(__name__)
 
+# Workstream D2: the four post-D2 source values that all represent a user
+# override (as opposed to NLP auto-extraction). Legacy persisted blobs may
+# still carry the pre-D2 ``"override"`` string, so we accept that too when
+# reading from DB.
+_OVERRIDE_SOURCE_VALUES = frozenset({
+    "kg_mid", "curated_list", "override_unverified", "override",
+})
+
+
+class _BrandNLPClientAdapter:
+    """Adapter that exposes ``analyze_entities`` as a sync-callable method.
+
+    ``backend/google_nlp_client.py`` exposes module-level *async* functions
+    (``analyze_entities``, ``classify_text``). The brand resolver expects a
+    duck-typed object with a sync ``analyze_entities(text)`` method (it's
+    called from ``resolve_brand`` which is itself sync). This adapter
+    bridges the two — running the async coroutine to completion via
+    ``asyncio.run``. Cost is one ~1-unit NLP call per brand override
+    validation (~$0.001), so the blocking call is acceptable in the
+    AI Visibility orchestrator's async context.
+    """
+    def __init__(self):
+        import google_nlp_client  # type: ignore[import-not-found]
+        self._mod = google_nlp_client
+
+    def analyze_entities(self, text: str):
+        import asyncio
+        coro = self._mod.analyze_entities(text)
+        # We're inside an already-running event loop (run_ai_visibility_analysis
+        # is an async function). asyncio.run() can't be used from a running
+        # loop. We use loop-aware execution: schedule on a fresh event loop
+        # in a background thread to avoid the "running loop" reentrancy issue.
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            # We're inside the live loop — run the coroutine in a fresh loop
+            # in a worker thread. This keeps resolve_brand's sync interface
+            # while still consuming the async google_nlp_client.
+            import concurrent.futures
+            def _runner():
+                return asyncio.run(coro)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_runner)
+                results = future.result(timeout=35)
+        else:
+            results = asyncio.run(coro)
+        # Convert dataclass results to plain dicts that the resolver
+        # understands (matching the test fakes' shape). The resolver reads
+        # entity.metadata.mid / metadata.wikipedia_url; map fields back.
+        return [
+            {
+                "name": e.name,
+                "type": e.entity_type,
+                "salience": e.salience,
+                "metadata": {
+                    k: v for k, v in [
+                        ("mid", e.knowledge_graph_mid),
+                        ("wikipedia_url", e.wikipedia_url),
+                    ] if v
+                },
+            }
+            for e in (results or [])
+        ]
+
+
+def _build_brand_nlp_client():
+    """Construct a brand-validation NLP client, or None if NLP isn't configured.
+
+    Returns None when ``GOOGLE_API_KEY`` is unset so the resolver gracefully
+    falls through to the curated-list / override_unverified path. Any other
+    construction error also returns None — never raises into the caller.
+    """
+    try:
+        import google_nlp_client  # type: ignore[import-not-found]
+        if not google_nlp_client.is_configured():
+            return None
+        return _BrandNLPClientAdapter()
+    except Exception as e:  # pragma: no cover — defensive
+        logger.info(
+            "Brand NLP client unavailable — skipping KG validation (%s)", e,
+        )
+        return None
+
 
 def _resolve_status(engine_results: dict) -> str:
     """Determine overall status from per-engine results."""
@@ -118,10 +203,13 @@ async def run_ai_visibility_analysis(
 
         # Check for existing override in DB
         # The brand_override param takes precedence (from recompute request),
-        # but we also check the report for a previously saved override
+        # but we also check the report for a previously saved override.
+        # Workstream D2 split "override" into {kg_mid, curated_list,
+        # override_unverified} — any of those (plus the legacy literal
+        # "override" for old records) means the user provided this string.
         if not brand_override:
             existing_viz = report.get("ai_visibility") or {}
-            if existing_viz.get("brand_name_source") == "override":
+            if existing_viz.get("brand_name_source") in _OVERRIDE_SOURCE_VALUES:
                 brand_override = existing_viz.get("brand_name")
 
         # Workstream D3: resolve the industry through the priority ladder
@@ -139,17 +227,50 @@ async def run_ai_visibility_analysis(
             )
 
         # Stage 1: Resolve brand
+        # Workstream D2: validate user-provided overrides via Google NLP's
+        # KG MID metadata, then category-leaf rejection, then a curated
+        # whitelist, before falling through to "override_unverified".
+        # nlp_client is a thin adapter exposing analyze_entities — when
+        # GOOGLE_API_KEY isn't configured the resolver gracefully skips
+        # layers 1-2 and falls straight to the curated/unverified path.
+        nlp_client = _build_brand_nlp_client()
         try:
-            brand_info = resolve_brand(brand_override, nlp_entities)
+            brand_info = resolve_brand(
+                brand_override,
+                nlp_entities,
+                nlp_client=nlp_client,
+            )
         except BrandExtractionError as e:
-            logger.warning(f"AI Visibility: brand extraction failed for {audit_id}: {e}")
-            await update_audit_report(audit_id, {
-                "ai_visibility": {
-                    "last_computed_at": datetime.now(timezone.utc).isoformat(),
-                    "last_computed_status": "failed",
-                    "error": str(e),
-                }
-            })
+            # Differentiate the two error shapes:
+            #   - User provided an override but it was rejected as a category
+            #     phrase → "needs_brand_confirmation" (mirror D3's industry
+            #     gate). Frontend renders a "refine your brand" card.
+            #   - No override AND no usable NLP entities → legacy "failed"
+            #     status (existing behavior preserved for the auto-extract
+            #     path; the recompute UI handles this with its own prompt).
+            had_override = bool(brand_override and brand_override.strip())
+            existing_viz = report.get("ai_visibility") or {}
+            blob: dict[str, Any] = {
+                "last_computed_at": datetime.now(timezone.utc).isoformat(),
+                "run_count": existing_viz.get("run_count", 0) or 0,
+                "cumulative_cost_usd": existing_viz.get("cumulative_cost_usd", 0) or 0,
+            }
+            if had_override:
+                logger.warning(
+                    f"AI Visibility: brand override rejected for {audit_id}: {e}"
+                )
+                blob["last_computed_status"] = "needs_brand_confirmation"
+                blob["brand_validation_warning"] = str(e)
+                # Echo the rejected user input so the frontend can pre-fill
+                # the modal with what they typed.
+                blob["brand_name"] = brand_override.strip()  # type: ignore[union-attr]
+            else:
+                logger.warning(
+                    f"AI Visibility: brand extraction failed for {audit_id}: {e}"
+                )
+                blob["last_computed_status"] = "failed"
+                blob["error"] = str(e)
+            await update_audit_report(audit_id, {"ai_visibility": blob})
             return
 
         # Stage 2: Resolve competitors
@@ -299,7 +420,9 @@ async def run_ai_visibility_analysis(
                         brand_name_override = $2
                     WHERE id = $3""",
                     this_run_cost,
-                    brand_info.name if brand_info.source == "override" else None,
+                    # D2: any of the three override-discriminator values means
+                    # the user supplied this brand string; persist their input.
+                    brand_info.name if brand_info.source in _OVERRIDE_SOURCE_VALUES else None,
                     audit_id_uuid,
                 )
         except Exception as e:

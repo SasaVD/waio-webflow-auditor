@@ -2784,9 +2784,15 @@ async def ai_visibility_brand_preview(audit_id: str):
     except BrandExtractionError:
         pass
 
-    # Check for existing override
+    # Check for existing override.
+    # Workstream D2 split the single "override" discriminator into three
+    # confidence tiers: "kg_mid" (KG-validated), "curated_list" (whitelist),
+    # "override_unverified" (low-confidence fallback). Any of those means
+    # the user previously supplied this string. Legacy persisted records
+    # may still carry the literal "override" string.
+    _OVERRIDE_SOURCES = {"kg_mid", "curated_list", "override_unverified", "override"}
     existing_viz = report.get("ai_visibility") or {}
-    override = existing_viz.get("brand_name") if existing_viz.get("brand_name_source") == "override" else None
+    override = existing_viz.get("brand_name") if existing_viz.get("brand_name_source") in _OVERRIDE_SOURCES else None
 
     # Competitor preview
     competitor_urls = report.get("competitor_urls") or []

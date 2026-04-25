@@ -6,13 +6,34 @@ from typing import Any
 @dataclass
 class BrandInfo:
     name: str
-    source: str  # "override" | "nlp"
+    # Source discriminator (Workstream D2 — Contract B):
+    #   "kg_mid"              — override validated via Knowledge Graph MID /
+    #                           Wikipedia URL (HIGHEST confidence).
+    #   "curated_list"        — override matched against curated brand whitelist
+    #                           (MEDIUM confidence).
+    #   "override_unverified" — override used but NLP unavailable / no KG hit /
+    #                           not in curated list (LOWEST confidence; UI shows
+    #                           an advisory).
+    #   "nlp"                 — NO override; brand extracted from page NLP
+    #                           entities (existing behavior, unchanged).
+    # The pre-D2 ``"override"`` value has been removed — every override path
+    # now picks one of the three discriminators above.
+    source: str
     salience: float | None = None
+    kg_mid: str | None = None
+    wikipedia_url: str | None = None
+    warning: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name, "source": self.source}
         if self.salience is not None:
             d["salience"] = round(self.salience, 4)
+        if self.kg_mid:
+            d["kg_mid"] = self.kg_mid
+        if self.wikipedia_url:
+            d["wikipedia_url"] = self.wikipedia_url
+        if self.warning:
+            d["warning"] = self.warning
         return d
 
 

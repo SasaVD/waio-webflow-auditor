@@ -15,10 +15,34 @@ def test_brand_info_to_dict_with_salience():
 
 
 def test_brand_info_to_dict_without_salience():
-    b = BrandInfo(name="Belt Creative", source="override")
+    # Workstream D2: 'override' was replaced by the 3-layer discriminator.
+    # 'override_unverified' represents the lowest-confidence override path
+    # (no KG hit, not in curated list).
+    b = BrandInfo(name="Belt Creative", source="override_unverified")
     d = b.to_dict()
-    assert d == {"name": "Belt Creative", "source": "override"}
+    assert d == {"name": "Belt Creative", "source": "override_unverified"}
     assert "salience" not in d
+
+
+def test_brand_info_to_dict_with_kg_metadata():
+    """KG-validated overrides emit kg_mid + wikipedia_url alongside the source."""
+    b = BrandInfo(
+        name="HubSpot",
+        source="kg_mid",
+        kg_mid="/m/0cxygf",
+        wikipedia_url="https://en.wikipedia.org/wiki/HubSpot",
+    )
+    d = b.to_dict()
+    assert d["source"] == "kg_mid"
+    assert d["kg_mid"] == "/m/0cxygf"
+    assert d["wikipedia_url"] == "https://en.wikipedia.org/wiki/HubSpot"
+
+
+def test_brand_info_to_dict_curated_omits_kg_fields():
+    """Curated-list resolutions don't have KG metadata — fields stay absent."""
+    b = BrandInfo(name="Veza Digital", source="curated_list")
+    d = b.to_dict()
+    assert d == {"name": "Veza Digital", "source": "curated_list"}
 
 
 def test_competitor_set_to_dict():
