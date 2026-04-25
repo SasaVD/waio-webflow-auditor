@@ -51,12 +51,20 @@ PILLAR_TO_CATEGORY: Dict[str, str] = {
 
 
 def _get_scores(report: dict) -> Dict[str, int]:
-    """Extract pillar key → score mapping from report categories."""
+    """Extract pillar key → score mapping from report categories.
+
+    Workstream D4: skip pillars whose scan_status is not "ok". Post-D4
+    these pillars score 0 (not 100), so leaving them in would cause
+    _weak() to flag a bot-challenged pillar as the "weakest" — still
+    misleading. Excluding them keeps _weak/_strong honest and lets the
+    `scores.get("X", 100)` defaults at call sites treat the pillar as
+    not-applicable rather than worst-in-class.
+    """
     cats = report.get("categories", {})
     scores: Dict[str, int] = {}
     for key in PILLAR_LABELS:
         cat = cats.get(key)
-        if cat:
+        if cat and cat.get("scan_status", "ok") == "ok":
             scores[key] = cat.get("score", 0)
     return scores
 

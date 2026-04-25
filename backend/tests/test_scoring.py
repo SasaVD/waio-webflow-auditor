@@ -130,3 +130,85 @@ def test_all_ok_pillars_produce_normal_overall_score():
     assert result["overall_label"] == "Excellent"
     assert result["coverage_weight"] == 1.0
     assert all(s == "ok" for s in result["scan_statuses"].values())
+
+
+# ─── Workstream D4: non-ok pillar scoring inversion ───
+#
+# Pre-D4: calculate_score(findings=[]) returns 100. Auditors that crashed or
+# were bot-challenged emit empty findings + scan_status="failed" — so the raw
+# scores dict showed 100 even though no analysis ran. Coverage renormalization
+# (D1) suppressed the OVERALL score, but per-pillar consumers (exec summary,
+# PDF tiles, dashboard cards) read scores[pillar] directly and saw a fake 100.
+# D4 zeros these out at compile time so every consumer sees a safe integer.
+
+
+def test_failed_pillar_scores_zero_not_hundred():
+    """Regression: auditor exception path (scan_status='failed') used to emit
+    score=100 because calculate_score with empty findings returns 100. D4
+    forces score=0 for any non-ok pillar so downstream consumers don't see
+    a confidently-wrong 'perfect' pillar."""
+    failed = {"checks": {}, "findings": [], "positive_findings": [], "scan_status": "failed"}
+    ok = {"checks": {}, "findings": [], "positive_findings": [], "scan_status": "ok"}
+    result = compile_scores(
+        html_res=ok, sd_res=failed, aeo_res=failed, css_js_res=failed,
+        a11y_res=failed, rag_res=failed, agent_res=failed, data_res=failed,
+        internal_linking_res=failed,
+    )
+    assert result["scores"]["structured_data"] == 0
+    assert result["scores"]["semantic_html"] == 100  # ok pillar retains calculate_score result
+    assert result["scores"]["accessibility"] == 0
+    assert result["labels"]["structured_data"] == "Scan incomplete"
+    assert result["labels"]["semantic_html"] != "Scan incomplete"
+
+
+def test_bot_challenged_pillar_scores_zero():
+    """All pillars bot_challenged → every score is 0, overall is None, labels
+    are 'Scan incomplete'."""
+    bot = {"checks": {}, "findings": [], "positive_findings": [], "scan_status": "bot_challenged"}
+    result = compile_scores(
+        html_res=bot, sd_res=bot, aeo_res=bot, css_js_res=bot,
+        a11y_res=bot, rag_res=bot, agent_res=bot, data_res=bot,
+        internal_linking_res=bot,
+    )
+    assert all(result["scores"][k] == 0 for k in result["scores"])
+    assert all(result["labels"][k] == "Scan incomplete" for k in result["labels"])
+    assert result["overall_score"] is None
+
+
+def test_incomplete_pillar_scores_zero():
+    """scan_status='incomplete' (partial auditor run) also scores 0."""
+    incomplete = {"checks": {}, "findings": [], "positive_findings": [], "scan_status": "incomplete"}
+    ok = {"checks": {}, "findings": [], "positive_findings": [], "scan_status": "ok"}
+    result = compile_scores(
+        html_res=ok, sd_res=ok, aeo_res=ok, css_js_res=ok, a11y_res=incomplete,
+        rag_res=ok, agent_res=ok, data_res=ok, internal_linking_res=ok,
+    )
+    assert result["scores"]["accessibility"] == 0
+    assert result["labels"]["accessibility"] == "Scan incomplete"
+
+
+def test_css_js_paired_non_ok_zeroes_both_subpillars():
+    """css_quality and js_bloat share a single auditor (css_js_res). When that
+    auditor fails, both sub-pillars must score 0 — regression lock."""
+    css_js_failed = {"checks": {}, "findings": [], "positive_findings": [], "scan_status": "failed"}
+    ok = {"checks": {}, "findings": [], "positive_findings": [], "scan_status": "ok"}
+    result = compile_scores(
+        html_res=ok, sd_res=ok, aeo_res=ok, css_js_res=css_js_failed,
+        a11y_res=ok, rag_res=ok, agent_res=ok, data_res=ok, internal_linking_res=ok,
+    )
+    assert result["scores"]["css_quality"] == 0
+    assert result["scores"]["js_bloat"] == 0
+    assert result["labels"]["css_quality"] == "Scan incomplete"
+    assert result["labels"]["js_bloat"] == "Scan incomplete"
+
+
+def test_ok_pillars_retain_calculate_score_result():
+    """Negative control: D4 must not change ok-pillar scoring. With zero
+    findings, score = 100 as before."""
+    ok = {"checks": {}, "findings": [], "positive_findings": [], "scan_status": "ok"}
+    result = compile_scores(
+        html_res=ok, sd_res=ok, aeo_res=ok, css_js_res=ok, a11y_res=ok,
+        rag_res=ok, agent_res=ok, data_res=ok, internal_linking_res=ok,
+    )
+    assert result["overall_score"] == 100
+    assert all(v == 100 for v in result["scores"].values())

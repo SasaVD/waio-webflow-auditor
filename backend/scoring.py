@@ -21,6 +21,15 @@ PILLAR_WEIGHTS: Dict[str, float] = {
 # subset. Option A above; Option C (suppress) below.
 MIN_COVERAGE_FOR_SCORE = 0.70
 
+# Workstream D4: scan_status values that mean "this pillar's analysis did not
+# complete successfully". calculate_score(findings=[]) returns 100 by design
+# (no deductions), but for non-ok pillars there were no findings to BEGIN with
+# — the auditor never ran or was bot-blocked. Forcing score=0 on these
+# pillars stops every downstream consumer (exec summary, PDF tiles, dashboard
+# cards) from reading a confidently-wrong "perfect" pillar score. See the
+# zeroing loop in compile_scores below for the full rationale.
+NON_OK_STATUSES = {"failed", "incomplete", "bot_challenged"}
+
 
 def calculate_score(findings: list[Dict[str, Any]]) -> int:
     score = 100.0
@@ -135,6 +144,20 @@ def compile_scores(
         "internal_linking": il_score,
     }
 
+    # Workstream D4: non-ok pillars score 0, not the 100 that calculate_score
+    # emits when the findings list is empty. This prevents confidently-wrong
+    # "perfect" scores on pillars whose auditor never ran (sched.com 2026-04-23).
+    # Coverage renormalization (loop below) already excludes these from overall,
+    # but the raw scores dict is consumed by exec_summary_generator, PDF tiles,
+    # dashboard pillar cards, and any other code that reads scores[pillar]
+    # directly without checking scan_status. 0 is a safe integer for all
+    # downstream comparisons; None would require touching ~51 consumers.
+    # css_quality + js_bloat both inherit css_js_status, so iterating
+    # scan_statuses zeroes both sub-pillars together when css_js_res fails.
+    for pillar_key, status in scan_statuses.items():
+        if status in NON_OK_STATUSES:
+            raw_scores[pillar_key] = 0
+
     # Option A: weighted average over pillars that scanned successfully.
     # covered_weight is summed from PILLAR_WEIGHTS, not pillar count — so
     # Accessibility (18%) failing alone drops coverage to 82%, not 90%.
@@ -160,22 +183,21 @@ def compile_scores(
     css_js_res['css_score'] = css_score
     css_js_res['js_score'] = js_score
 
+    # Workstream D4: labels for non-ok pillars are "Scan incomplete", not the
+    # "Critical" that get_label(0) would produce. A bot-challenged pillar isn't
+    # critically broken — it just wasn't analyzed. Surface the truth.
+    pillar_labels: Dict[str, str] = {}
+    for pillar_key, status in scan_statuses.items():
+        if status in NON_OK_STATUSES:
+            pillar_labels[pillar_key] = "Scan incomplete"
+        else:
+            pillar_labels[pillar_key] = get_label(raw_scores[pillar_key])
+
     return {
         "overall_score": overall,
         "overall_label": overall_label,
         "coverage_weight": round(covered_weight, 4),
         "scan_statuses": scan_statuses,
         "scores": raw_scores,
-        "labels": {
-            "semantic_html": get_label(html_score),
-            "structured_data": get_label(sd_score),
-            "aeo_content": get_label(aeo_score),
-            "css_quality": get_label(css_score),
-            "js_bloat": get_label(js_score),
-            "accessibility": get_label(a11y_score),
-            "rag_readiness": get_label(rag_score),
-            "agentic_protocols": get_label(agent_score),
-            "data_integrity": get_label(data_score),
-            "internal_linking": get_label(il_score)
-        }
+        "labels": pillar_labels,
     }
