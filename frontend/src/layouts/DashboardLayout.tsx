@@ -385,29 +385,45 @@ export default function DashboardLayout() {
               </div>
             </motion.div>
           )}
-          {enrichment.status === 'timed_out' && (
+          {/* Workstream D production fix (2026-04-27): both timed_out and
+              no_data are TERMINAL states from the user's perspective — the
+              site-wide crawl couldn't complete. Pre-fix, timed_out used a
+              spinner + "Crawl is still processing" copy, which made the
+              dashboard look stuck on bot-protected sites (cvent.com audit
+              20685624 was the smoking gun). Both states now share the same
+              terminal-failure UX with a Retry button that re-pokes the
+              poller for users who want to check again. */}
+          {(enrichment.status === 'timed_out' || enrichment.status === 'no_data') && (
             <motion.div
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               className="mx-4 mt-4 lg:mx-6 lg:mt-5"
             >
-              <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-3.5 flex items-start gap-3">
-                <Loader2 size={18} className="text-blue-600 animate-spin mt-0.5 flex-shrink-0" />
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3.5 flex items-start gap-3">
+                <AlertTriangle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-blue-900">
-                    Crawl is still processing
+                  <p className="text-sm font-semibold text-amber-900">
+                    {enrichment.status === 'no_data'
+                      ? 'Site-wide crawl blocked by bot protection'
+                      : "Site-wide crawl couldn't complete"}
                   </p>
-                  <p className="text-xs text-blue-700 mt-0.5">
-                    Link graph and topic clusters will appear once complete. This can take up to 20 minutes for larger sites.
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    {enrichment.status === 'no_data'
+                      ? "The target site's bot protection (Cloudflare or similar) blocked our crawler — DataForSEO couldn't fetch enough pages."
+                      : "The crawl ran past its time budget without producing usable data — most often a sign the target site's bot protection blocked our crawler."}
+                    {' '}Link graph and topic clusters are not available for this audit.
+                  </p>
+                  <p className="text-xs text-amber-700 mt-1.5">
+                    All other intelligence (TIPR, NLP, AI Visibility, Content Optimizer, executive summary) ran on the data we could collect.
                   </p>
                   <button
                     onClick={() => enrichment.refreshNow()}
                     disabled={enrichment.isRefreshing}
-                    className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                    className="mt-2.5 inline-flex items-center gap-1.5 text-xs font-semibold text-amber-900 hover:text-amber-950 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
                   >
                     <RefreshCw size={12} className={enrichment.isRefreshing ? 'animate-spin' : ''} />
-                    {enrichment.isRefreshing ? 'Checking...' : 'Refresh now'}
+                    {enrichment.isRefreshing ? 'Checking…' : 'Retry crawl'}
                   </button>
                 </div>
               </div>
@@ -428,26 +444,6 @@ export default function DashboardLayout() {
                   </p>
                   <p className="text-xs text-amber-700 mt-0.5">
                     The rest of your report is ready. {enrichment.progress}
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          )}
-          {enrichment.status === 'no_data' && (
-            <motion.div
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="mx-4 mt-4 lg:mx-6 lg:mt-5"
-            >
-              <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3.5 flex items-start gap-3">
-                <AlertTriangle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-amber-900">
-                    Site-wide crawl blocked by bot protection
-                  </p>
-                  <p className="text-xs text-amber-700 mt-0.5">
-                    {enrichment.progress || 'The site blocks automated crawlers (Cloudflare or similar), so DataForSEO couldn\'t fetch any pages. Your single-page audit is complete, but Link Graph, Link Intelligence, and Topic Clusters require a multi-page crawl and are unavailable for this site.'}
                   </p>
                 </div>
               </div>

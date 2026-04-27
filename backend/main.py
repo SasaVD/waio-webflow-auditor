@@ -1824,6 +1824,56 @@ def _extract_lightweight_entities(title: str, url: str) -> list[dict]:
     return entities[:10]
 
 
+async def _kickoff_ai_visibility_if_opted_in(audit_id, audit_record: dict | None = None) -> bool:
+    """Spawn AI Visibility as a sibling task if the audit opted in.
+
+    Workstream D2 production fix (2026-04-27): this used to live at the END
+    of `_enrich_report_from_crawl` — AFTER the trivial-crawl early-return,
+    AFTER link graph + TIPR + clusters were built. That meant bot-protected
+    sites (DFS returns ≤1 page, ≤0 links → early return at line ~1893)
+    silently never got AI Visibility, even though AI Visibility's data path
+    is independent of the DFS On-Page crawl. Lifting the kickoff out so it
+    runs on BOTH paths.
+
+    Returns True if a task was scheduled, False otherwise (audit not found,
+    not opted in, or already kicked off and running). Always non-fatal —
+    swallows any exception so enrichment can continue.
+    """
+    try:
+        # Re-fetch only when caller didn't provide a record. The kickoff only
+        # reads audit-submission-time fields (ai_visibility_opt_in, brand_name,
+        # target_industry) which never change during enrichment, so a stale
+        # record from earlier in the pipeline is safe to reuse.
+        if audit_record is None:
+            audit_record = await get_audit_by_id(audit_id)
+        if not audit_record:
+            return False
+        aiv_rpt = audit_record.get("report_json") or {}
+        if isinstance(aiv_rpt, str):
+            aiv_rpt = json.loads(aiv_rpt)
+        if not aiv_rpt.get("ai_visibility_opt_in"):
+            return False
+        brand_override = aiv_rpt.get("ai_visibility_brand_name")
+        # Workstream D3: thread the user's declared industry through so the
+        # engine resolves it via resolve_industry() without re-reading the DB.
+        target_industry = (
+            aiv_rpt.get("target_industry")
+            or (aiv_rpt.get("audit_config") or {}).get("target_industry")
+        )
+        asyncio.create_task(
+            run_ai_visibility_analysis(
+                audit_id=str(audit_id),
+                brand_override=brand_override,
+                target_industry=target_industry,
+            )
+        )
+        logger.info(f"AI Visibility sibling task launched for audit {audit_id}")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to launch AI Visibility sibling task (non-fatal): {e}")
+        return False
+
+
 async def _enrich_report_from_crawl(
     task_id: str, dfs_client: DataForSEOClient, summary: dict
 ):
@@ -1847,6 +1897,16 @@ async def _enrich_report_from_crawl(
         homepage_url = audit_record["url"]
 
         logger.info(f"Enriching audit {audit_id} with DataForSEO crawl data from task {task_id}")
+
+        # Workstream D production fix (2026-04-27): launch AI Visibility BEFORE
+        # touching DFS data. AI Visibility only needs audit-submission state
+        # (ai_visibility_opt_in, brand override, target_industry, page NLP
+        # already populated by the homepage audit). The trivial-crawl early
+        # return below used to skip this kickoff for bot-protected sites
+        # (Ticketmaster audit 9a954c09 was the smoking gun — DFS returned 1
+        # page, no links, function returned at line ~1893, AI Visibility was
+        # never scheduled, blob never written).
+        await _kickoff_ai_visibility_if_opted_in(audit_id, audit_record)
 
         # Fetch all pages and links from DataForSEO (GET endpoints are FREE)
         pages_data = await dfs_client.get_all_pages(task_id)
@@ -1999,32 +2059,9 @@ async def _enrich_report_from_crawl(
         except Exception as e:
             logger.warning(f"Post-enrichment summary regeneration failed (non-fatal): {e}")
 
-        # ── Spawn AI Visibility as a sibling task (Phase 3) ──
-        try:
-            enriched_for_aiv = await get_audit_by_id(audit_id)
-            if enriched_for_aiv:
-                aiv_rpt = enriched_for_aiv.get("report_json") or {}
-                if isinstance(aiv_rpt, str):
-                    aiv_rpt = json.loads(aiv_rpt)
-                if aiv_rpt.get("ai_visibility_opt_in"):
-                    brand_override = aiv_rpt.get("ai_visibility_brand_name")
-                    # Workstream D3: thread the user's declared industry
-                    # through so the engine can resolve it via
-                    # resolve_industry() without re-reading the DB record.
-                    target_industry = (
-                        aiv_rpt.get("target_industry")
-                        or (aiv_rpt.get("audit_config") or {}).get("target_industry")
-                    )
-                    asyncio.create_task(
-                        run_ai_visibility_analysis(
-                            audit_id=str(audit_id),
-                            brand_override=brand_override,
-                            target_industry=target_industry,
-                        )
-                    )
-                    logger.info(f"AI Visibility sibling task launched for audit {audit_id}")
-        except Exception as e:
-            logger.warning(f"Failed to launch AI Visibility sibling task (non-fatal): {e}")
+        # AI Visibility kickoff used to live here. Lifted to the top of this
+        # function (above the trivial-crawl early-return) so it fires for
+        # bot-protected sites that produce no DFS link graph.
 
         # Also persist link graph edges to the dedicated table
         try:
