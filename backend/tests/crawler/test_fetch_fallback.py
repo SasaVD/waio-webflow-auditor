@@ -34,7 +34,7 @@ def test_http_403_falls_back_to_playwright(monkeypatch):
     def boom(_url):
         raise Exception("403 Client Error: Forbidden for url: https://www.loungelizard.com/")
 
-    async def fake_pw(_url):
+    async def fake_pw(_url, **_kwargs):
         return _PW_HTML
 
     monkeypatch.setattr(crawler, "fetch_url", boom)
@@ -50,7 +50,7 @@ def test_both_paths_fail_raises_informative_error(monkeypatch):
     def http_boom(_url):
         raise Exception("403 Forbidden")
 
-    async def pw_boom(_url):
+    async def pw_boom(_url, **_kwargs):
         raise Exception("net::ERR_TIMED_OUT")
 
     monkeypatch.setattr(crawler, "fetch_url", http_boom)
@@ -68,7 +68,7 @@ def test_thin_http_response_upgrades_to_playwright(monkeypatch):
     def thin(_url):
         return "<html><body></body></html>"
 
-    async def fake_pw(_url):
+    async def fake_pw(_url, **_kwargs):
         return _PW_HTML
 
     monkeypatch.setattr(crawler, "fetch_url", thin)
@@ -85,7 +85,7 @@ def test_thin_http_and_failed_playwright_keeps_http_result(monkeypatch):
     def thin(_url):
         return "<html><body></body></html>"
 
-    async def pw_boom(_url):
+    async def pw_boom(_url, **_kwargs):
         raise Exception("browser crashed")
 
     monkeypatch.setattr(crawler, "fetch_url", thin)

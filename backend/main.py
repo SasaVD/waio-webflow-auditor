@@ -11,7 +11,7 @@ from typing import List, Optional
 import os
 import asyncio
 
-from crawler import fetch_page, close_browser
+from crawler import fetch_page, close_browser, get_browser
 from bot_detection import detect_bot_challenge
 from html_auditor import run_html_audit
 from structured_data_auditor import run_structured_data_audit
@@ -253,85 +253,107 @@ async def perform_audit(request: AuditRequest):
     tier = request.tier if request.tier in ("free", "premium") else "free"
     logger.info(f"Starting {tier} audit for {url}")
     try:
-        fetch_result = await fetch_page(url)
-        html_content = fetch_result.html
-        soup = fetch_result.soup
-
-        # Bot-challenge detection — see perform_premium_audit for the full
-        # rationale. If the homepage fetch returned a verification wall, the
-        # 10 auditors would score a decoy; short-circuit with bot_challenged
-        # placeholders so compile_scores suppresses overall_score to None.
-        bot_result = detect_bot_challenge(
-            soup=soup,
-            html=html_content,
-            headers=fetch_result.headers,
-            cookies=fetch_result.cookies,
+        # Workstream E: audit-scoped shared BrowserContext. Cookies + UA from
+        # the homepage Playwright fetch persist into accessibility's later
+        # page.goto, so a Cloudflare challenge cleared at the homepage is not
+        # re-issued when accessibility opens its own page. The context is
+        # closed unconditionally in the finally block at audit end.
+        browser = await get_browser()
+        audit_context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
         )
-        if bot_result.detected:
-            logger.warning(
-                "Bot challenge detected for %s (vendor=%s, signals=%s, reason=%s)",
-                url, bot_result.vendor, bot_result.signals, bot_result.reason,
+        try:
+            fetch_result = await fetch_page(url, shared_context=audit_context)
+            html_content = fetch_result.html
+            soup = fetch_result.soup
+
+            # Bot-challenge detection — see perform_premium_audit for the full
+            # rationale. If the homepage fetch returned a verification wall, the
+            # 10 auditors would score a decoy; short-circuit with bot_challenged
+            # placeholders so compile_scores suppresses overall_score to None.
+            bot_result = detect_bot_challenge(
+                soup=soup,
+                html=html_content,
+                headers=fetch_result.headers,
+                cookies=fetch_result.cookies,
             )
+            if bot_result.detected:
+                logger.warning(
+                    "Bot challenge detected for %s (vendor=%s, signals=%s, reason=%s)",
+                    url, bot_result.vendor, bot_result.signals, bot_result.reason,
+                )
 
-        # Run the 10 deterministic pillars (always, regardless of tier).
-        # Each is wrapped so one pillar crashing doesn't lose the other nine —
-        # compile_scores drops failed pillars from the weighted average.
-        if bot_result.detected:
-            html_res = _bot_challenged_pillar_result(bot_result)
-            sd_res = _bot_challenged_pillar_result(bot_result)
-            css_js_res = _bot_challenged_pillar_result(bot_result)
-            aeo_res = _bot_challenged_pillar_result(bot_result)
-            rag_res = _bot_challenged_pillar_result(bot_result)
-            agent_res = _bot_challenged_pillar_result(bot_result)
-            data_res = _bot_challenged_pillar_result(bot_result)
-            il_res = _bot_challenged_pillar_result(bot_result)
-            a11y_res = _bot_challenged_pillar_result(bot_result)
-        else:
-            logger.info(f"Running HTML audit for {url}")
-            html_res = _safe_run_pillar("semantic_html", run_html_audit, soup, html_content)
+            # Run the 10 deterministic pillars (always, regardless of tier).
+            # Each is wrapped so one pillar crashing doesn't lose the other nine —
+            # compile_scores drops failed pillars from the weighted average.
+            if bot_result.detected:
+                html_res = _bot_challenged_pillar_result(bot_result)
+                sd_res = _bot_challenged_pillar_result(bot_result)
+                css_js_res = _bot_challenged_pillar_result(bot_result)
+                aeo_res = _bot_challenged_pillar_result(bot_result)
+                rag_res = _bot_challenged_pillar_result(bot_result)
+                agent_res = _bot_challenged_pillar_result(bot_result)
+                data_res = _bot_challenged_pillar_result(bot_result)
+                il_res = _bot_challenged_pillar_result(bot_result)
+                a11y_res = _bot_challenged_pillar_result(bot_result)
+            else:
+                logger.info(f"Running HTML audit for {url}")
+                html_res = _safe_run_pillar("semantic_html", run_html_audit, soup, html_content)
 
-            logger.info(f"Running Structured Data audit for {url}")
-            sd_res = _safe_run_pillar("structured_data", run_structured_data_audit, html_content, url)
+                logger.info(f"Running Structured Data audit for {url}")
+                sd_res = _safe_run_pillar("structured_data", run_structured_data_audit, html_content, url)
 
-            logger.info(f"Running CSS/JS audit for {url}")
-            css_js_res = _safe_run_pillar("css_js", run_css_js_audit, soup, html_content)
+                logger.info(f"Running CSS/JS audit for {url}")
+                css_js_res = _safe_run_pillar("css_js", run_css_js_audit, soup, html_content)
 
-            logger.info(f"Running AEO content audit for {url}")
-            aeo_res = _safe_run_pillar("aeo_content", run_aeo_content_audit, soup, html_content)
+                logger.info(f"Running AEO content audit for {url}")
+                aeo_res = _safe_run_pillar("aeo_content", run_aeo_content_audit, soup, html_content)
 
-            logger.info(f"Running RAG Readiness audit for {url}")
-            rag_res = _safe_run_pillar("rag_readiness", run_rag_readiness_audit, soup, html_content)
+                logger.info(f"Running RAG Readiness audit for {url}")
+                rag_res = _safe_run_pillar("rag_readiness", run_rag_readiness_audit, soup, html_content)
 
-            logger.info(f"Running Agentic Protocol audit for {url}")
-            agent_res = _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url)
+                logger.info(f"Running Agentic Protocol audit for {url}")
+                agent_res = _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url)
 
-            logger.info(f"Running Data Integrity audit for {url}")
-            data_res = _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content)
+                logger.info(f"Running Data Integrity audit for {url}")
+                data_res = _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content)
 
-            logger.info(f"Running Internal Linking audit for {url}")
-            il_res = _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, str(request.url), site_data=None)
+                logger.info(f"Running Internal Linking audit for {url}")
+                il_res = _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, str(request.url), site_data=None)
 
-            logger.info(f"Running Accessibility audit for {url}")
-            a11y_res = await _safe_run_pillar_async("accessibility", run_accessibility_audit, url)
+                logger.info(f"Running Accessibility audit for {url}")
+                # Workstream E: pass the audit-scoped context so accessibility
+                # inherits cookies + UA from the homepage fetch above.
+                # _safe_run_pillar_async forwards **kwargs (line ~209).
+                a11y_res = await _safe_run_pillar_async(
+                    "accessibility", run_accessibility_audit, url,
+                    shared_context=audit_context,
+                )
 
-        logger.info("Compiling scores and report")
-        scores = compile_scores(html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, il_res)
-        report = generate_report(url, html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, scores, il_res, tier=tier)
-        report["bot_challenge"] = {
-            "detected": True,
-            "vendor": bot_result.vendor,
-            "signals": bot_result.signals,
-            "reason": bot_result.reason,
-            "confidence": bot_result.confidence,
-        } if bot_result.detected else None
+            logger.info("Compiling scores and report")
+            scores = compile_scores(html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, il_res)
+            report = generate_report(url, html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, scores, il_res, tier=tier)
+            report["bot_challenge"] = {
+                "detected": True,
+                "vendor": bot_result.vendor,
+                "signals": bot_result.signals,
+                "reason": bot_result.reason,
+                "confidence": bot_result.confidence,
+            } if bot_result.detected else None
 
-        # Premium modules will be added in later sprints (executive summary, fix KB, etc.)
+            # Premium modules will be added in later sprints (executive summary, fix KB, etc.)
 
-        # Auto-save to audit history
-        audit_id = await save_audit_history(url, "single", report.get("overall_score", 0), report.get("overall_label", "N/A"), report, tier=tier)
-        report["audit_id"] = str(audit_id)
+            # Auto-save to audit history
+            audit_id = await save_audit_history(url, "single", report.get("overall_score", 0), report.get("overall_label", "N/A"), report, tier=tier)
+            report["audit_id"] = str(audit_id)
 
-        return report
+            return report
+        finally:
+            try:
+                await audit_context.close()
+            except Exception as ctx_err:
+                logger.debug(f"Audit context close failed (non-fatal): {ctx_err}")
 
     except Exception as e:
         logger.error(f"Audit failed for {url}: {str(e)}")
@@ -377,8 +399,19 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
     logger.info("=== PREMIUM AUDIT START ===")
     logger.info(f"URL: {url}, audit_id={audit_id}")
     logger.info(f"Config: DataForSEO={is_dataforseo_configured()}, NLP={is_nlp_configured()}, competitors={len(request.competitor_urls)}")
+    # Workstream E: audit-scoped shared BrowserContext. The accessibility
+    # auditor's Playwright launch inherits cookies + UA from the homepage
+    # fetch below, so a Cloudflare challenge cleared at the homepage is not
+    # re-issued when accessibility opens its own page (sched.com audit
+    # 0e2b5690-5de5-4228-90a5-b8c376991aa9 motivated this fix). Closed in
+    # the finally block at audit end so contexts don't leak on errors.
+    browser = await get_browser()
+    audit_context = await browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+        viewport={"width": 1280, "height": 800},
+    )
     try:
-        fetch_result = await fetch_page(url)
+        fetch_result = await fetch_page(url, shared_context=audit_context)
         html_content = fetch_result.html
         soup = fetch_result.soup
         logger.info(f"Page fetched: {len(html_content)} bytes")
@@ -426,7 +459,13 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
             agent_res = _safe_run_pillar("agentic_protocols", run_agentic_protocol_audit, soup, html_content, url)
             data_res = _safe_run_pillar("data_integrity", run_data_integrity_audit, soup, html_content)
             il_res = _safe_run_pillar("internal_linking", run_internal_linking_audit, soup, html_content, url, site_data=None)
-            a11y_res = await _safe_run_pillar_async("accessibility", run_accessibility_audit, url)
+            # Workstream E: pass the audit-scoped context so accessibility
+            # inherits cookies + UA from the homepage fetch above.
+            # _safe_run_pillar_async forwards **kwargs (line ~209).
+            a11y_res = await _safe_run_pillar_async(
+                "accessibility", run_accessibility_audit, url,
+                shared_context=audit_context,
+            )
 
         scores = compile_scores(html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, il_res)
         report = generate_report(url, html_res, sd_res, aeo_res, css_js_res, a11y_res, rag_res, agent_res, data_res, scores, il_res, tier="premium")
@@ -770,6 +809,15 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
     except Exception as e:
         logger.error(f"Premium audit failed for {url}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Premium audit failed: {str(e)}")
+    finally:
+        # Workstream E: tear down the audit-scoped BrowserContext. Cookies +
+        # pages opened during the audit are released. Any background task
+        # launched by the audit (e.g. _poll_and_enrich_crawl) does NOT use
+        # this context, so closing here is safe.
+        try:
+            await audit_context.close()
+        except Exception as ctx_err:
+            logger.debug(f"Audit context close failed (non-fatal): {ctx_err}")
 
 @app.get("/api/audit/status/{job_id}")
 async def get_audit_status(job_id: str):

@@ -1,8 +1,8 @@
 import asyncio
 import logging
 import re
-from typing import Dict, Any, List
-from playwright.async_api import Browser, Page
+from typing import Dict, Any, List, Optional
+from playwright.async_api import Browser, BrowserContext, Page
 from axe_playwright_python.async_playwright import Axe
 from crawler import get_browser
 from utils import truncate_html
@@ -50,12 +50,35 @@ def _axe_node_to_element_entry(node: Any) -> Dict[str, str]:
 
 logger = logging.getLogger(__name__)
 
-async def run_accessibility_audit(url: str) -> Dict[str, Any]:
-    browser = await get_browser()
-    context = await browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        viewport={"width": 1280, "height": 800}
-    )
+async def run_accessibility_audit(
+    url: str,
+    *,
+    shared_context: Optional[BrowserContext] = None,
+) -> Dict[str, Any]:
+    """Run the 5 accessibility checks on ``url``.
+
+    Workstream E: when ``shared_context`` is provided (audit-scoped context
+    opened by the orchestrator), the auditor calls ``shared_context.new_page()``
+    instead of opening its own context. Cookies and fingerprint accumulated by
+    the homepage fetch persist into this page.goto, so a Cloudflare/Akamai
+    challenge cleared at the homepage is not re-issued here. Caller owns the
+    lifecycle of ``shared_context`` — this function only closes the page.
+
+    When ``shared_context`` is None, behaviour is unchanged: a fresh context
+    is created with the hardcoded UA + viewport and closed in the finally
+    block (legacy path, used by site_crawler / competitive_auditor / scheduler).
+    """
+    own_context = False
+    context: BrowserContext
+    if shared_context is None:
+        browser = await get_browser()
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800}
+        )
+        own_context = True
+    else:
+        context = shared_context
     page = await context.new_page()
 
     checks = {}
@@ -92,7 +115,16 @@ async def run_accessibility_audit(url: str) -> Dict[str, Any]:
         scan_error = str(e)
         logger.warning("Accessibility scan failed for %s: %s", url, scan_error)
     finally:
-        await context.close()
+        # Workstream E: only close the context if WE created it. With a
+        # shared_context, the orchestrator owns the lifecycle. The page is
+        # always closed (it belongs to this audit).
+        if own_context:
+            await context.close()
+        else:
+            try:
+                await page.close()
+            except Exception:
+                pass
 
     for check_key, check_val in checks.items():
         if check_val.get("status") in ["pass", "info"]:

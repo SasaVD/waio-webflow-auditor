@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 import asyncio
-from playwright.async_api import async_playwright, Browser
+from playwright.async_api import async_playwright, Browser, BrowserContext
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,11 @@ def fetch_url(url: str):
     return response.text, resp_headers, resp_cookies, response.status_code
 
 
-async def fetch_page(url: str) -> FetchResult:
+async def fetch_page(
+    url: str,
+    *,
+    shared_context: Optional[BrowserContext] = None,
+) -> FetchResult:
     """
     Fetches the HTML content of a given URL. Uses an HTTP GET request (via requests).
     If the content appears to be a JS-rendered SPA (minimal content),
@@ -80,6 +84,14 @@ async def fetch_page(url: str) -> FetchResult:
 
     Returns a FetchResult carrying html, soup, headers, cookies, status_code
     so downstream bot-challenge detection has the full picture.
+
+    Workstream E: when ``shared_context`` is provided, any Playwright fallback
+    runs inside that audit-scoped BrowserContext rather than opening a fresh
+    one. Cookies and browser fingerprint persist across all fetches in one
+    audit so the accessibility auditor's downstream Playwright launch inherits
+    the same identity that already cleared bot detection at the homepage.
+    Caller owns the lifecycle of ``shared_context`` — fetch_page does NOT
+    close it.
     """
     html_content = ""
     headers_out: dict = {}
@@ -100,7 +112,7 @@ async def fetch_page(url: str) -> FetchResult:
         # any HTTP-layer failure as "try Playwright" rather than aborting.
         logger.info(f"HTTP fetch failed for {url} ({e}); falling back to Playwright")
         try:
-            pw_result = await fetch_page_with_playwright(url)
+            pw_result = await fetch_page_with_playwright(url, shared_context=shared_context)
             if isinstance(pw_result, tuple):
                 html_content, headers_out, cookies_out, status_code = pw_result
             else:
@@ -117,7 +129,7 @@ async def fetch_page(url: str) -> FetchResult:
     if not body or len(body.text.strip()) < 100 or len(html_content) < 5000:
         logger.info(f"Minimal content detected for {url}, upgrading to Playwright...")
         try:
-            pw_result = await fetch_page_with_playwright(url)
+            pw_result = await fetch_page_with_playwright(url, shared_context=shared_context)
             if isinstance(pw_result, tuple):
                 html_content, headers_out, cookies_out, status_code = pw_result
             else:
@@ -135,24 +147,41 @@ async def fetch_page(url: str) -> FetchResult:
     )
 
 
-async def fetch_page_with_playwright(url: str):
+async def fetch_page_with_playwright(
+    url: str,
+    *,
+    shared_context: Optional[BrowserContext] = None,
+):
     """Render a page with headless Chromium.
 
     Returns a 4-tuple (html, headers, cookies, status_code). Tests that
     monkeypatch this function to return a bare string are still supported by
     fetch_page, which handles both shapes.
-    """
-    browser = await get_browser()
-    if not browser:
-        raise ValueError("Critical error: Playwright browser could not be initialized.")
 
-    context = await browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-    )
+    Workstream E: if ``shared_context`` is provided, the page is opened inside
+    that context and the context is NOT closed at the end (caller owns
+    lifecycle). When ``shared_context`` is None (legacy path), behaviour is
+    unchanged: a fresh context is created here with the hardcoded UA and
+    closed in the finally block.
+    """
+    own_context = False
+    if shared_context is None:
+        browser = await get_browser()
+        if not browser:
+            raise ValueError("Critical error: Playwright browser could not be initialized.")
+
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        )
+        own_context = True
+    else:
+        context = shared_context
+
     html_content = ""
     resp_headers: dict = {}
     resp_cookies: dict = {}
     status_code: Optional[int] = None
+    page = None
     try:
         page = await context.new_page()
         # Use domcontentloaded + longer timeout: networkidle hangs on any site
@@ -175,9 +204,10 @@ async def fetch_page_with_playwright(url: str):
         except Exception as load_err:
             logger.info(f"Playwright load state not reached for {url} ({load_err}); proceeding with DOM snapshot")
 
-        # Capture cookies BEFORE context.close() — they're discarded with the
-        # context. This is the only way Cloudflare/Akamai cookie-based bot
-        # detection sees __cf_bm / _abck / etc.
+        # Capture cookies BEFORE the context closes — they're discarded with
+        # the context. This is the only way Cloudflare/Akamai cookie-based bot
+        # detection sees __cf_bm / _abck / etc. With shared_context, cookies
+        # also persist on the live context for accessibility's later page.goto.
         try:
             cookies_list = await context.cookies()
             resp_cookies = {c.get("name", ""): c.get("value", "") for c in cookies_list if c.get("name")}
@@ -191,6 +221,15 @@ async def fetch_page_with_playwright(url: str):
         # Ensure we re-raise to satisfy type checker and propagate the error
         raise ValueError(f"Failed to fetch {url} via Playwright: {e}") from e
     finally:
-        await context.close()
+        # Workstream E: only close the context if WE created it. With a
+        # shared_context, the orchestrator owns the lifecycle. The page is
+        # always closed (it belongs to this fetch).
+        if own_context:
+            await context.close()
+        elif page is not None:
+            try:
+                await page.close()
+            except Exception:
+                pass
 
     return html_content, resp_headers, resp_cookies, status_code

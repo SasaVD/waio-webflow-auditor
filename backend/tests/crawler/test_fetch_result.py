@@ -79,7 +79,7 @@ def test_fetch_page_playwright_fallback_carries_headers_and_cookies(monkeypatch)
     def http_boom(_url):
         raise Exception("403 Forbidden")
 
-    async def fake_pw(_url):
+    async def fake_pw(_url, **_kwargs):
         return _PW_HTML, {"server": "cloudflare"}, {"__cf_bm": "captured"}, 403
 
     monkeypatch.setattr(crawler, "fetch_url", http_boom)
@@ -99,7 +99,7 @@ def test_fetch_page_legacy_string_playwright_return_still_works(monkeypatch):
     def http_boom(_url):
         raise Exception("net::ERR_FAILED")
 
-    async def fake_pw_string_only(_url):
+    async def fake_pw_string_only(_url, **_kwargs):
         return _PW_HTML  # legacy shape
 
     monkeypatch.setattr(crawler, "fetch_url", http_boom)
@@ -110,3 +110,126 @@ def test_fetch_page_legacy_string_playwright_return_still_works(monkeypatch):
     assert "Real page content" in result.html
     assert result.headers == {}
     assert result.cookies == {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Workstream E: shared_context propagation
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_fetch_page_legacy_no_shared_context_unchanged(monkeypatch):
+    """Existing callers without shared_context get current behavior — Playwright
+    fallback is invoked exactly as before, no shared_context plumbing visible."""
+    captured = {}
+
+    def http_boom(_url):
+        raise Exception("403 Forbidden")
+
+    async def fake_pw(_url, *, shared_context=None):
+        captured["shared_context"] = shared_context
+        return _PW_HTML, {"server": "nginx"}, {"a": "b"}, 200
+
+    monkeypatch.setattr(crawler, "fetch_url", http_boom)
+    monkeypatch.setattr(crawler, "fetch_page_with_playwright", fake_pw)
+
+    result = _run(crawler.fetch_page("https://example.com/"))
+    assert isinstance(result, FetchResult)
+    # No shared_context provided → fetch_page_with_playwright sees None.
+    assert captured["shared_context"] is None
+
+
+def test_fetch_page_propagates_shared_context_to_playwright_fallback(monkeypatch):
+    """When fetch_page is given a shared_context, it forwards that exact
+    object to fetch_page_with_playwright on the HTTP-fail fallback path."""
+    sentinel_context = object()  # opaque marker — fetch_page only needs to forward
+    captured = {}
+
+    def http_boom(_url):
+        raise Exception("403 Forbidden")
+
+    async def fake_pw(_url, *, shared_context=None):
+        captured["shared_context"] = shared_context
+        return _PW_HTML, {}, {}, 200
+
+    monkeypatch.setattr(crawler, "fetch_url", http_boom)
+    monkeypatch.setattr(crawler, "fetch_page_with_playwright", fake_pw)
+
+    _run(crawler.fetch_page("https://example.com/", shared_context=sentinel_context))
+    assert captured["shared_context"] is sentinel_context
+
+
+def test_fetch_page_propagates_shared_context_on_thin_body_upgrade(monkeypatch):
+    """The thin-body upgrade path also forwards shared_context — this is where
+    the homepage Playwright fetch typically lands when HTTP succeeds but the
+    page is JS-rendered (the sched.com codepath)."""
+    sentinel_context = object()
+    captured = {}
+
+    def thin(_url):
+        return "<html><body></body></html>"  # triggers thin-body upgrade
+
+    async def fake_pw(_url, *, shared_context=None):
+        captured["shared_context"] = shared_context
+        return _PW_HTML, {}, {}, 200
+
+    monkeypatch.setattr(crawler, "fetch_url", thin)
+    monkeypatch.setattr(crawler, "fetch_page_with_playwright", fake_pw)
+
+    _run(crawler.fetch_page("https://spa.example/", shared_context=sentinel_context))
+    assert captured["shared_context"] is sentinel_context
+
+
+def test_fetch_page_with_playwright_does_not_close_shared_context(monkeypatch):
+    """When fetch_page_with_playwright is given a shared_context, it must NOT
+    close it — caller owns lifecycle. The page IS closed (it belongs to this
+    fetch), but the context lives on for accessibility's later page.goto."""
+
+    class _FakePage:
+        def __init__(self):
+            self.closed = False
+
+        async def goto(self, _url, **_kwargs):
+            return None  # response can be None per fetch_page_with_playwright tolerance
+
+        async def wait_for_load_state(self, *_a, **_kw):
+            pass
+
+        async def content(self):
+            return _PW_HTML
+
+        async def close(self):
+            self.closed = True
+
+    fake_page = _FakePage()
+
+    class _FakeContext:
+        def __init__(self):
+            self.close_called = False
+            self.new_page_called = False
+
+        async def new_page(self):
+            self.new_page_called = True
+            return fake_page
+
+        async def cookies(self):
+            return [{"name": "__cf_bm", "value": "cleared"}]
+
+        async def close(self):
+            self.close_called = True
+
+    fake_ctx = _FakeContext()
+
+    # Must not call get_browser() since we're providing the context directly.
+    def must_not_call_get_browser():
+        raise AssertionError("get_browser called despite shared_context being provided")
+
+    monkeypatch.setattr(crawler, "get_browser", must_not_call_get_browser)
+
+    html, headers, cookies, status = _run(
+        crawler.fetch_page_with_playwright("https://example.com/", shared_context=fake_ctx)
+    )
+
+    assert html == _PW_HTML
+    assert cookies == {"__cf_bm": "cleared"}
+    assert fake_ctx.new_page_called, "should have called shared_context.new_page()"
+    assert fake_ctx.close_called is False, "must NOT close the shared context"
+    assert fake_page.closed is True, "must close the page (fetch owns it)"

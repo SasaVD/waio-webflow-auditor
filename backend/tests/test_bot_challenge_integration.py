@@ -57,7 +57,8 @@ def test_perform_audit_short_circuits_on_cloudflare_challenge(monkeypatch):
     """End-to-end: Cloudflare challenge page → all 10 pillars skipped,
     overall_score=None, bot_challenge block populated."""
 
-    async def fake_fetch(_url):
+    async def fake_fetch(_url, **_kwargs):
+        # Workstream E: orchestrator now passes shared_context kwarg; tolerate it.
         return FetchResult(
             html=_CLOUDFLARE_CHALLENGE_HTML,
             soup=BeautifulSoup(_CLOUDFLARE_CHALLENGE_HTML, "html.parser"),
@@ -67,6 +68,21 @@ def test_perform_audit_short_circuits_on_cloudflare_challenge(monkeypatch):
         )
 
     monkeypatch.setattr(main, "fetch_page", fake_fetch)
+
+    # Workstream E: orchestrator opens an audit-scoped BrowserContext via
+    # get_browser().new_context(). Stub both so tests don't launch real Chromium.
+    class _FakeContext:
+        async def close(self):
+            pass
+
+    class _FakeBrowser:
+        async def new_context(self, **_kwargs):
+            return _FakeContext()
+
+    async def _fake_get_browser():
+        return _FakeBrowser()
+
+    monkeypatch.setattr(main, "get_browser", _fake_get_browser)
 
     # Sentinel: any auditor firing would mean the hook failed. Replace each
     # auditor with a function that raises — if the hook is working, none run.
@@ -122,7 +138,8 @@ def test_perform_audit_normal_path_unchanged_when_no_challenge(monkeypatch):
         "</body></html>"
     )
 
-    async def fake_fetch(_url):
+    async def fake_fetch(_url, **_kwargs):
+        # Workstream E: orchestrator now passes shared_context kwarg; tolerate it.
         return FetchResult(
             html=clean_html,
             soup=BeautifulSoup(clean_html, "html.parser"),
@@ -132,6 +149,20 @@ def test_perform_audit_normal_path_unchanged_when_no_challenge(monkeypatch):
         )
 
     monkeypatch.setattr(main, "fetch_page", fake_fetch)
+
+    # Workstream E: stub the audit-scoped BrowserContext lifecycle.
+    class _FakeContext:
+        async def close(self):
+            pass
+
+    class _FakeBrowser:
+        async def new_context(self, **_kwargs):
+            return _FakeContext()
+
+    async def _fake_get_browser():
+        return _FakeBrowser()
+
+    monkeypatch.setattr(main, "get_browser", _fake_get_browser)
 
     async def _fake_save(*_a, **_kw):
         return "test-audit-id"
