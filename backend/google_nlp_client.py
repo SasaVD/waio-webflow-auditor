@@ -271,12 +271,20 @@ def _prepare_text(text: str) -> str:
 async def analyze_entities(
     text: str,
     api_key: str | None = None,
+    min_tokens: int = 5,
 ) -> List[NLPEntityResult]:
     """Analyze entities in text using v1 API (returns salience scores).
 
     Args:
         text: Plain text content.
         api_key: Google API key. Falls back to GOOGLE_API_KEY env var.
+        min_tokens: Minimum word count required to invoke the API. The
+            default of 5 protects the page-content analysis caller from
+            spending credits on thin pages where entity extraction would
+            be noise. Brand-string validation (Workstream D2) passes
+            ``min_tokens=1`` because real brand names are 1-3 words by
+            definition; the original 5-word guard was silently bypassing
+            every KG MID lookup.
 
     Returns:
         List of entities sorted by salience (descending).
@@ -285,7 +293,7 @@ async def analyze_entities(
     if not key:
         raise ValueError("GOOGLE_API_KEY env var required for entity analysis")
 
-    if len(text.split()) < 5:
+    if len(text.split()) < min_tokens:
         return []
 
     body = {

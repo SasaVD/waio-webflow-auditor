@@ -45,7 +45,12 @@ class _BrandNLPClientAdapter:
 
     def analyze_entities(self, text: str):
         import asyncio
-        coro = self._mod.analyze_entities(text)
+        # Workstream D2 finding (2026-04-27): the underlying
+        # google_nlp_client.analyze_entities defaults to min_tokens=5 to
+        # skip thin pages, which silently bypassed KG MID validation for
+        # every real brand string (1-3 words). Pass min_tokens=1 so brand
+        # validation actually hits the API.
+        coro = self._mod.analyze_entities(text, min_tokens=1)
         # We're inside an already-running event loop (run_ai_visibility_analysis
         # is an async function). asyncio.run() can't be used from a running
         # loop. We use loop-aware execution: schedule on a fresh event loop

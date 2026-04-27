@@ -310,36 +310,63 @@ export const AuditForm: React.FC<AuditFormProps> = ({
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
                         exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden space-y-2"
+                        className="overflow-hidden space-y-3"
                       >
-                        <div className="bg-surface-raised border border-border rounded-lg p-1">
-                          <input
-                            type="text"
-                            className="w-full bg-transparent px-3 py-2 text-sm font-medium text-text placeholder:text-text-muted focus:outline-none"
-                            placeholder="Brand name (optional — auto-detected if blank)"
-                            value={brandName}
-                            onChange={(e) => setBrandName(e.target.value)}
-                            disabled={isLoading}
-                          />
+                        {/* Brand name — Workstream D2 production fix
+                            (2026-04-27): persistent label + per-field
+                            helper + brand-only placeholder examples so
+                            this field can't be confused with the industry
+                            field below. The previous placeholder-only
+                            treatment caused field-misalignment confusion
+                            on a real production audit (audit 9192396f). */}
+                        <div className="space-y-1">
+                          <label
+                            htmlFor="audit-brand-name"
+                            className="block text-xs font-semibold text-text px-1"
+                          >
+                            Brand name
+                          </label>
+                          <p className="text-[11px] text-text-muted px-1 leading-snug">
+                            Your company or product name. Leave blank to auto-detect from page content.
+                          </p>
+                          <div className="bg-surface-raised border border-border rounded-lg p-1">
+                            <input
+                              id="audit-brand-name"
+                              type="text"
+                              className="w-full bg-transparent px-3 py-2 text-sm font-medium text-text placeholder:text-text-muted focus:outline-none"
+                              placeholder="e.g. HubSpot, Webflow, Sched"
+                              value={brandName}
+                              onChange={(e) => setBrandName(e.target.value)}
+                              disabled={isLoading}
+                            />
+                          </div>
                         </div>
-                        {/* Workstream D3: optional user-declared industry.
-                            Leaving blank triggers NLP detection first, then
-                            the "Needs attention" modal flow if that also
-                            yields nothing. */}
-                        <div className="bg-surface-raised border border-border rounded-lg p-1">
-                          <input
-                            type="text"
-                            className="w-full bg-transparent px-3 py-2 text-sm font-medium text-text placeholder:text-text-muted focus:outline-none"
-                            placeholder="Industry or niche (optional — e.g. Event management software, B2B SaaS, fintech)"
-                            value={targetIndustry}
-                            onChange={(e) => setTargetIndustry(e.target.value)}
-                            disabled={isLoading}
-                          />
+                        {/* Industry or niche — Workstream D3: optional
+                            user-declared industry. Leaving blank triggers
+                            NLP detection first, then the "Needs attention"
+                            modal flow if that also yields nothing. */}
+                        <div className="space-y-1">
+                          <label
+                            htmlFor="audit-target-industry"
+                            className="block text-xs font-semibold text-text px-1"
+                          >
+                            Industry or niche
+                          </label>
+                          <p className="text-[11px] text-text-muted px-1 leading-snug">
+                            Sharpens AI Visibility benchmarks. Leave blank to auto-detect.
+                          </p>
+                          <div className="bg-surface-raised border border-border rounded-lg p-1">
+                            <input
+                              id="audit-target-industry"
+                              type="text"
+                              className="w-full bg-transparent px-3 py-2 text-sm font-medium text-text placeholder:text-text-muted focus:outline-none"
+                              placeholder="e.g. Event management software, B2B SaaS, fintech"
+                              value={targetIndustry}
+                              onChange={(e) => setTargetIndustry(e.target.value)}
+                              disabled={isLoading}
+                            />
+                          </div>
                         </div>
-                        <p className="text-[11px] text-text-muted px-1 leading-snug">
-                          Leave blank to auto-detect from your content. Providing
-                          this makes AI Visibility benchmarks more accurate.
-                        </p>
                       </motion.div>
                     )}
                   </AnimatePresence>
