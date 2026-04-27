@@ -286,3 +286,179 @@ async def test_ai_visibility_uses_nlp_detected_when_no_user_override(monkeypatch
     )
     assert blob["industry"]["source"] == "nlp_detected"
     assert blob["industry"]["user_provided"] is None
+
+
+@pytest.mark.asyncio
+async def test_ai_visibility_blob_persists_kg_mid_and_wikipedia_url(monkeypatch):
+    """Workstream D2 production fix (2026-04-27): when resolve_brand returns
+    a BrandInfo with kg_mid + wikipedia_url populated (source='kg_mid'), the
+    engine MUST persist those fields to the blob so the dashboard / PDF /
+    exports can show the KG metadata. Pre-fix the engine dropped them
+    silently — observed on production audit cdb1ae29-bab2-4c19-9f34-7dcbd8757931
+    where brand_name_source='kg_mid' but kg_mid + wikipedia_url were None
+    in the persisted blob."""
+    import ai_visibility.engine as engine_module
+
+    async def fake_get_audit(audit_id):
+        return {
+            "url": "https://www.ticketmaster.com/",
+            "report_json": {
+                "nlp_analysis": {"detected_industry": None, "entities": []},
+                "target_industry": "Event ticketing",
+            },
+            "competitor_urls": [],
+        }
+
+    monkeypatch.setattr("db_router.get_audit_by_id", fake_get_audit, raising=True)
+    monkeypatch.setattr(
+        "db_router.update_audit_report", _fake_update_audit_report, raising=True
+    )
+
+    # The resolver returns a real BrandInfo with KG metadata. We use the
+    # actual dataclass here (not MagicMock) so the engine reads through the
+    # same attribute access pattern that production uses.
+    from ai_visibility.schema import BrandInfo
+    kg_brand = BrandInfo(
+        name="Ticketmaster",
+        source="kg_mid",
+        kg_mid="/m/0gby4n",
+        wikipedia_url="https://en.wikipedia.org/wiki/Ticketmaster",
+    )
+    monkeypatch.setattr(engine_module, "resolve_brand", lambda *a, **kw: kg_brand)
+
+    # Stub the rest of the pipeline so we get to the blob assembly
+    def fake_build_prompts(industry, top_entity, brand_name):
+        from ai_visibility.schema import PromptTemplate
+        return [PromptTemplate(id=i, category="discovery", text=f"p{i}") for i in (1, 2, 3, 4)]
+    monkeypatch.setattr(engine_module, "build_prompts", fake_build_prompts)
+
+    fake_competitors = MagicMock()
+    fake_competitors.domains = []
+    fake_competitors.to_dict = lambda: {"domains": [], "source": "none"}
+    monkeypatch.setattr(engine_module, "resolve_competitors", lambda *a, **kw: fake_competitors)
+
+    async def fake_fetch_mentions(*a, **kw):
+        m = MagicMock()
+        m.to_dict = lambda: {"total": 0}
+        return m
+
+    async def fake_fetch_responses(*a, **kw):
+        r = MagicMock()
+        r.engines = {"chatgpt": MagicMock(status="ok", to_dict=lambda: {})}
+        r.to_dict = lambda: {"engines": {}}
+        return r
+
+    monkeypatch.setattr(engine_module, "fetch_mentions", fake_fetch_mentions)
+    monkeypatch.setattr(engine_module, "fetch_responses", fake_fetch_responses)
+
+    class FakeDFSClient:
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(engine_module, "DataForSEOClient", FakeDFSClient)
+
+    await engine_module.run_ai_visibility_analysis(audit_id="kg-test-001")
+
+    # Find the final blob update
+    relevant = [
+        c
+        for c in _fake_update_audit_report.calls
+        if "ai_visibility" in c[1]
+        and isinstance(c[1]["ai_visibility"], dict)
+        and c[1]["ai_visibility"].get("brand_name") == "Ticketmaster"
+    ]
+    assert relevant, "expected a blob update with brand_name=Ticketmaster"
+    blob = relevant[-1][1]["ai_visibility"]
+
+    # Anchor checks: brand identity carries through unchanged
+    assert blob["brand_name"] == "Ticketmaster"
+    assert blob["brand_name_source"] == "kg_mid"
+
+    # The fix under test: KG metadata must be in the persisted blob
+    assert blob.get("kg_mid") == "/m/0gby4n", (
+        f"Expected kg_mid='/m/0gby4n' in persisted blob, got {blob.get('kg_mid')!r}. "
+        "This is the production regression from 2026-04-27 — engine.py was dropping "
+        "BrandInfo.kg_mid during blob assembly even when source='kg_mid'."
+    )
+    assert blob.get("wikipedia_url") == "https://en.wikipedia.org/wiki/Ticketmaster", (
+        f"Expected wikipedia_url in persisted blob, got {blob.get('wikipedia_url')!r}. "
+        "Same regression as kg_mid — engine.py dropped the URL during blob assembly."
+    )
+
+
+@pytest.mark.asyncio
+async def test_ai_visibility_blob_omits_kg_fields_for_curated_or_unverified_brands(monkeypatch):
+    """Negative control: brands resolved via curated_list or override_unverified
+    don't carry KG metadata. The blob should NOT include kg_mid / wikipedia_url
+    keys at all (vs. setting them to None) — keeps the blob slim and avoids
+    misleading the frontend into thinking a curated brand has KG validation."""
+    import ai_visibility.engine as engine_module
+
+    async def fake_get_audit(audit_id):
+        return {
+            "url": "https://example.com/",
+            "report_json": {
+                "nlp_analysis": {"detected_industry": None, "entities": []},
+                "target_industry": "Marketing",
+            },
+            "competitor_urls": [],
+        }
+
+    monkeypatch.setattr("db_router.get_audit_by_id", fake_get_audit, raising=True)
+    monkeypatch.setattr(
+        "db_router.update_audit_report", _fake_update_audit_report, raising=True
+    )
+
+    from ai_visibility.schema import BrandInfo
+    # Curated brand — no KG metadata, just canonical name
+    curated_brand = BrandInfo(name="Veza Digital", source="curated_list")
+    monkeypatch.setattr(engine_module, "resolve_brand", lambda *a, **kw: curated_brand)
+
+    def fake_build_prompts(industry, top_entity, brand_name):
+        from ai_visibility.schema import PromptTemplate
+        return [PromptTemplate(id=i, category="discovery", text=f"p{i}") for i in (1, 2, 3, 4)]
+    monkeypatch.setattr(engine_module, "build_prompts", fake_build_prompts)
+
+    fake_competitors = MagicMock()
+    fake_competitors.domains = []
+    fake_competitors.to_dict = lambda: {"domains": [], "source": "none"}
+    monkeypatch.setattr(engine_module, "resolve_competitors", lambda *a, **kw: fake_competitors)
+
+    async def fake_fetch_mentions(*a, **kw):
+        m = MagicMock()
+        m.to_dict = lambda: {"total": 0}
+        return m
+
+    async def fake_fetch_responses(*a, **kw):
+        r = MagicMock()
+        r.engines = {"chatgpt": MagicMock(status="ok", to_dict=lambda: {})}
+        r.to_dict = lambda: {"engines": {}}
+        return r
+
+    monkeypatch.setattr(engine_module, "fetch_mentions", fake_fetch_mentions)
+    monkeypatch.setattr(engine_module, "fetch_responses", fake_fetch_responses)
+
+    class FakeDFSClient:
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(engine_module, "DataForSEOClient", FakeDFSClient)
+
+    await engine_module.run_ai_visibility_analysis(audit_id="curated-test-001")
+
+    relevant = [
+        c
+        for c in _fake_update_audit_report.calls
+        if "ai_visibility" in c[1]
+        and isinstance(c[1]["ai_visibility"], dict)
+        and c[1]["ai_visibility"].get("brand_name") == "Veza Digital"
+    ]
+    assert relevant
+    blob = relevant[-1][1]["ai_visibility"]
+
+    assert blob["brand_name_source"] == "curated_list"
+    # KG keys must be ABSENT (not None-valued) — keeps the blob slim and
+    # prevents the frontend from rendering a Wikipedia link / KG badge for
+    # a brand that wasn't actually KG-validated.
+    assert "kg_mid" not in blob
+    assert "wikipedia_url" not in blob

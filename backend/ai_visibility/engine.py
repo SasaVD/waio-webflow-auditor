@@ -401,6 +401,18 @@ async def run_ai_visibility_analysis(
         if sov:
             blob["share_of_voice"] = sov.to_dict()
 
+        # Workstream D2 production fix (2026-04-27): persist KG metadata
+        # alongside brand_name + brand_name_source. Without these, audits that
+        # KG-validate (source="kg_mid") still showed kg_mid=None / wikipedia_url=None
+        # in the persisted blob — the resolver populated BrandInfo.kg_mid /
+        # .wikipedia_url but the engine dropped them. Conditional emission
+        # keeps the blob slim for the curated_list / override_unverified / nlp
+        # paths that don't carry KG metadata.
+        if getattr(brand_info, "kg_mid", None):
+            blob["kg_mid"] = brand_info.kg_mid
+        if getattr(brand_info, "wikipedia_url", None):
+            blob["wikipedia_url"] = brand_info.wikipedia_url
+
         # Calculate cumulative cost
         existing_cumulative = report.get("ai_visibility", {}).get("cumulative_cost_usd", 0) or 0
         blob["cumulative_cost_usd"] = round(existing_cumulative + this_run_cost, 4)
