@@ -96,9 +96,16 @@ def is_ai_filler(term: str) -> bool:
         if hyphenated in ALL_SINGLE_WORD_FILLERS:
             return True
 
-    # Formulaic phrase match
+    # Formulaic phrase match — embedded phrase in candidate counts as filler.
+    # The reverse direction (candidate as substring of phrase) was REMOVED in
+    # 2026-04-28: it caused false positives where any short word that happens
+    # to be a substring of any formulaic phrase ("bot" ⊂ "the bottom line is",
+    # "day" ⊂ "at the end of the day", "digital" ⊂ "in today's digital") was
+    # incorrectly flagged as filler. Single-word candidates now fall through
+    # to the structural rules below; multi-word candidates only match when
+    # the formulaic phrase is genuinely embedded in them.
     for phrase in FORMULAIC_PHRASES:
-        if phrase in term_lower or term_lower in phrase:
+        if phrase in term_lower:
             return True
 
     # Multi-word structural checks
@@ -128,7 +135,8 @@ def get_filler_category(term: str) -> str:
         if hyphenated in _CATEGORY_MAP:
             return _CATEGORY_MAP[hyphenated]
     for phrase in FORMULAIC_PHRASES:
-        if phrase in term_lower or term_lower in phrase:
+        # See is_ai_filler() for why the reverse direction was removed.
+        if phrase in term_lower:
             return "formulaic_phrase"
     words = term_lower.split()
     if len(words) >= 2:

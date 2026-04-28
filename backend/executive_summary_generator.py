@@ -783,7 +783,7 @@ def _section_strategic_context(report: dict, scores: Dict[str, int]) -> str:
             lines.append(
                 f"Content analysis across {pages_frag} reveals an average content "
                 f"gap of {gap}% compared to top-ranking competitors — the content "
-                f"is significantly less comprehensive than pages currently ranking "
+                f"is significantly thinner than pages currently ranking "
                 f"for the same queries."
             )
         elif gap >= 30:
