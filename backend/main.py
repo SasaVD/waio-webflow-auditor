@@ -13,6 +13,8 @@ import asyncio
 
 from crawler import fetch_page, close_browser, get_browser
 from bot_detection import detect_bot_challenge
+from observability import record_event, get_event_aggregates
+from auth import require_admin
 from html_auditor import run_html_audit
 from structured_data_auditor import run_structured_data_audit
 from css_js_auditor import run_css_js_audit
@@ -247,6 +249,19 @@ async def shutdown_event():
 async def health_check():
     return {"status": "ok"}
 
+
+@app.get("/api/admin/bot-protection-stats")
+async def admin_bot_protection_stats(admin=Depends(require_admin)):
+    """Aggregate counters for bot-protection events (admin-only).
+
+    Surfaces the three signals wired in Workstream D (bot challenge),
+    the trivial-crawl handler (no_data), and the accessibility scanner
+    (scan_failed). Counters are per-process and in-memory; treat them
+    as directional. See backend/observability.py for the full rationale.
+    """
+    return {"events": get_event_aggregates()}
+
+
 @app.post("/api/audit")
 async def perform_audit(request: AuditRequest):
     url = str(request.url)
@@ -283,6 +298,7 @@ async def perform_audit(request: AuditRequest):
                     "Bot challenge detected for %s (vendor=%s, signals=%s, reason=%s)",
                     url, bot_result.vendor, bot_result.signals, bot_result.reason,
                 )
+                record_event("bot_challenge.detected", vendor=bot_result.vendor)
 
             # Run the 10 deterministic pillars (always, regardless of tier).
             # Each is wrapped so one pillar crashing doesn't lose the other nine —
@@ -434,6 +450,7 @@ async def perform_premium_audit(request: PremiumAuditRequest, user=Depends(get_c
                 "Bot challenge detected for %s (vendor=%s, signals=%s, reason=%s)",
                 url, bot_result.vendor, bot_result.signals, bot_result.reason,
             )
+            record_event("bot_challenge.detected", vendor=bot_result.vendor)
 
         # ── Phase 1: 10-pillar deterministic audit ──
         # Per-pillar exception isolation; see _safe_run_pillar docstring.
@@ -1977,6 +1994,7 @@ async def _enrich_report_from_crawl(
                 f"DataForSEO returned trivial crawl for task {task_id}: "
                 f"{len(pages_data)} pages, {len(links_data)} links — likely bot-protected site"
             )
+            record_event("crawl_status.no_data")
             await update_audit_report(audit_id, {
                 "crawl_status": "no_data",
                 "crawl_stats": {

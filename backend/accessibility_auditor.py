@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Optional
 from playwright.async_api import Browser, BrowserContext, Page
 from axe_playwright_python.async_playwright import Axe
 from crawler import get_browser
+from observability import record_event
 from utils import truncate_html
 
 
@@ -114,6 +115,7 @@ async def run_accessibility_audit(
         scan_status = "failed"
         scan_error = str(e)
         logger.warning("Accessibility scan failed for %s: %s", url, scan_error)
+        record_event("accessibility.scan_failed")
     finally:
         # Workstream E: only close the context if WE created it. With a
         # shared_context, the orchestrator owns the lifecycle. The page is
