@@ -90,7 +90,15 @@ export function AIVisibilityModal({
     setIndustryEditing(!initialIndustry || initialIndustry.value === null);
   }, [open, initialIndustry]);
 
-  const ambiguityWarning = checkBrandAmbiguity(brandName);
+  // Sweep #2: evaluate ambiguity against the EFFECTIVE brand — falling back
+  // to the auto-extracted value when the user hasn't typed anything yet.
+  // The brand-name-from-preview useEffect (above) populates brandName
+  // synchronously after preview lands, so in practice brandName usually
+  // holds the auto-extracted value already. The explicit fallback removes
+  // the dependency on useEffect-ordering for cases where the preview
+  // arrives mid-render or the user has cleared the input.
+  const effectiveBrand = brandName.trim() || brandPreview?.auto_extracted || '';
+  const ambiguityWarning = checkBrandAmbiguity(effectiveBrand);
   const needsIndustry =
     !initialIndustry
     || initialIndustry.value === null
@@ -183,7 +191,7 @@ export function AIVisibilityModal({
                     placeholder="Enter your brand name"
                     className="w-full px-3 py-2.5 bg-surface-overlay border border-border rounded-xl text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-all"
                   />
-                  {ambiguityWarning && brandName.trim() && (
+                  {ambiguityWarning && effectiveBrand && (
                     <p className="text-[11px] text-amber-400 mt-1.5 leading-snug">
                       {ambiguityWarning}
                     </p>
