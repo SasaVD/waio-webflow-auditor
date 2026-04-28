@@ -410,9 +410,8 @@ export default function DashboardLayout() {
                   </p>
                   <p className="text-xs text-amber-700 mt-0.5">
                     {enrichment.status === 'no_data'
-                      ? "The target site's bot protection (Cloudflare or similar) blocked our crawler — DataForSEO couldn't fetch enough pages."
-                      : "The crawl ran past its time budget without producing usable data — most often a sign the target site's bot protection blocked our crawler."}
-                    {' '}Link graph and topic clusters are not available for this audit.
+                      ? "The target site's bot protection (Cloudflare or similar) blocked our crawler — we couldn't fetch enough pages to build the link graph and topic clusters."
+                      : "The crawl ran past its time budget without producing usable data — most often a sign the target site's bot protection blocked our crawler. Link graph and topic clusters are not available for this audit."}
                   </p>
                   <p className="text-xs text-amber-700 mt-1.5">
                     All other intelligence (TIPR, NLP, AI Visibility, Content Optimizer, executive summary) ran on the data we could collect.

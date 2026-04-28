@@ -85,7 +85,7 @@ export default function DashboardGraphPage() {
             Crawl data could not be generated
           </p>
           <p className="text-xs text-text-muted max-w-md mx-auto">
-            Please try running the audit again. If the problem persists, check your DataForSEO configuration.
+            Please try running the audit again. If the problem persists, contact support — there may be a temporary issue with our crawler.
           </p>
         </motion.div>
       ) : !hasNodes && enrichment.status === 'no_data' ? (
