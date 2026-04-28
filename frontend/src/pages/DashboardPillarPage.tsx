@@ -21,6 +21,10 @@ import {
 } from 'lucide-react';
 import { useAuditStore } from '../stores/auditStore';
 import { PILLAR_LABELS } from '../constants/pillarLabels';
+import {
+  FindingElementsList,
+  type FindingElement,
+} from '../components/dashboard/FindingElementsList';
 
 /* ─── Pillar slug → backend key mapping ─── */
 const SLUG_TO_KEY: Record<string, string> = {
@@ -111,6 +115,11 @@ interface Finding {
   reference?: string;
   why_it_matters?: string;
   credibility_anchor?: string;
+  /** Per-element drill-down attached by the auditor layer (Workstream A,
+   * QW1-QW4). Populated for findings where the auditor captured DOM
+   * context at check time. May be undefined (most pillars) or an empty
+   * array (capture attempted but no qualifying elements). */
+  elements?: FindingElement[];
 }
 
 interface FixEntry {
@@ -295,6 +304,7 @@ export default function DashboardPillarPage() {
           <div className="space-y-3">
             {findings.map((f, i) => {
               const SevIcon = severityIcon[f.severity] ?? Info;
+              const elementCount = f.elements?.length ?? 0;
               return (
                 <div
                   key={i}
@@ -329,6 +339,26 @@ export default function DashboardPillarPage() {
                     >
                       Reference →
                     </a>
+                  )}
+                  {elementCount > 0 && (
+                    <details className="group mt-3">
+                      <summary className="flex items-center gap-1.5 cursor-pointer select-none list-none text-[11px] font-semibold text-accent hover:text-accent-hover">
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          className="transition-transform group-open:rotate-90 flex-shrink-0"
+                        >
+                          <polyline points="9 6 15 12 9 18" />
+                        </svg>
+                        Show {elementCount} affected element
+                        {elementCount === 1 ? '' : 's'}
+                      </summary>
+                      <FindingElementsList elements={f.elements} />
+                    </details>
                   )}
                 </div>
               );
