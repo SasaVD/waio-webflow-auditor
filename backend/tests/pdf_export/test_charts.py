@@ -159,6 +159,42 @@ def test_tipr_rewrites_preserve_nonzero_counts():
     assert "12 outbound links" in out
 
 
+def test_tipr_rewrites_zero_inbound_phrasing():
+    """B1.2 — historical persisted recommendations from older orphan
+    templates produced 'with only 0 inbound links' / 'only receives 0
+    inbound links' / '0 internal links'. The PDF defense layer must
+    naturalize these for stored recommendations until they get
+    recomputed under the post-B1.2 engine."""
+    cases = [
+        ("Add link to /buried (currently underlinked, only receives 0 inbound links)",
+         "doesn't receive any inbound links"),
+        ("Page with only 0 inbound links — well below site average",
+         "with no inbound links"),
+        ("This page has 0 inbound links and is invisible",
+         "no inbound links"),
+        ("Stranded with 0 internal links",
+         "no internal links"),
+        ("Page is invisible to search engines with just 0 internal links",
+         "with no internal links"),
+    ]
+    for original, expected_substring in cases:
+        out = pdf_mod._rewrite_zero_outbound_phrases(original)
+        assert expected_substring in out, (
+            f"Expected {expected_substring!r} in rewritten {original!r}, got {out!r}"
+        )
+        # And the unsubstituted-zero pattern should be gone
+        assert " 0 inbound" not in out
+        assert " 0 internal" not in out
+
+
+def test_tipr_rewrites_preserve_nonzero_inbound_counts():
+    """The new inbound rewrites must NOT touch non-zero inbound counts."""
+    reason = "/post receives 7 inbound links and has just 5 internal links"
+    out = pdf_mod._rewrite_zero_outbound_phrases(reason)
+    assert "7 inbound links" in out
+    assert "5 internal links" in out
+
+
 def test_gap_bar_height_is_visible_in_pdf():
     """Gap bar must have non-trivial height so WeasyPrint renders it reliably."""
     html = _render_html(_full_report())

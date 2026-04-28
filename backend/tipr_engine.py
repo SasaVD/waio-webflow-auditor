@@ -401,14 +401,32 @@ def generate_link_recommendations(
         # fallback
         return f"{c} outbound links"
 
+    def _inbound_phrase(count: int, style: str = "with_N_inbound") -> str:
+        """Render inbound count naturally so inbound=0 doesn't read like an
+        unsubstituted template variable. Mirrors _outbound_phrase. Critical
+        for orphan templates — orphans BY DEFINITION have 0 inbound links,
+        so every orphan recommendation hits this code path."""
+        c = int(count or 0)
+        if style == "with_N_inbound":
+            return "with no inbound links" if c == 0 else f"with only {c} inbound links"
+        if style == "with_N_internal":
+            return "with no internal links" if c == 0 else f"with just {c} internal links"
+        if style == "N_inbound_means":
+            return "no inbound links means no equity flow" if c == 0 else f"{c} inbound links means minimal equity flow"
+        if style == "only_receives_N":
+            return "doesn't receive any inbound links" if c == 0 else f"only receives {c} inbound links"
+        # fallback
+        return f"{c} inbound links"
+
     # --- Hoarder redistribution templates ---
     _HOARDER_TEMPLATES = [
         lambda s, t: (
             f"**{_short_path(s['url'])}** receives {s['inbound_count'] or 0} inbound links "
             f"but {_outbound_phrase(s.get('outbound_count'), 'links_out_to')}. It's "
             f"accumulating authority without sharing it. Adding a contextual link to "
-            f"**{_short_path(t['url'])}** (currently underlinked with only "
-            f"{t['inbound_count'] or 0} inbound links) would redistribute equity to your "
+            f"**{_short_path(t['url'])}** (currently underlinked, "
+            f"{_inbound_phrase(t.get('inbound_count'), 'only_receives_N')}) "
+            f"would redistribute equity to your "
             f"{_url_cluster(t['url']).strip('/')} content."
         ),
         lambda s, t: (
@@ -454,28 +472,30 @@ def generate_link_recommendations(
         ),
         lambda s, t: (
             f"**{_short_path(t['url'])}** in your "
-            f"{_url_cluster(t['url']).strip('/')} section has only "
-            f"{t['inbound_count'] or 0} inbound links — well below your site average of "
+            f"{_url_cluster(t['url']).strip('/')} section "
+            f"{_inbound_phrase(t.get('inbound_count'), 'only_receives_N')} — "
+            f"well below your site average of "
             f"{avg_inbound:.0f}. A link from the high-authority "
             f"**{_short_path(s['url'])}** would significantly boost its visibility."
         ),
         lambda s, t: (
             f"Your {_url_cluster(t['url']).strip('/')} content page "
-            f"**{_short_path(t['url'])}** is essentially invisible to search engines with "
-            f"just {t['inbound_count'] or 0} internal links. **{_short_path(s['url'])}** "
+            f"**{_short_path(t['url'])}** is essentially invisible to search engines "
+            f"{_inbound_phrase(t.get('inbound_count'), 'with_N_internal')}. "
+            f"**{_short_path(s['url'])}** "
             f"is a natural linking candidate given its strong authority "
             f"(PR: {s['pagerank_score'] or 0:.0f}) and related content."
         ),
         lambda s, t: (
             f"**{_short_path(t['url'])}** sits at click depth "
-            f"{t.get('depth') if t.get('depth') is not None else '∞'} with only "
-            f"{t['inbound_count'] or 0} inbound links. Adding a link from "
+            f"{t.get('depth') if t.get('depth') is not None else '∞'} "
+            f"{_inbound_phrase(t.get('inbound_count'), 'with_N_inbound')}. Adding a link from "
             f"**{_short_path(s['url'])}** would shorten the click path and improve crawl "
             f"efficiency."
         ),
         lambda s, t: (
             f"Content at **{_short_path(t['url'])}** is stranded — "
-            f"{t['inbound_count'] or 0} inbound links means minimal equity flow. "
+            f"{_inbound_phrase(t.get('inbound_count'), 'N_inbound_means')}. "
             f"**{_short_path(s['url'])}** has authority to spare "
             f"(PR: {s['pagerank_score'] or 0:.0f}, {s['outbound_count'] or 0} current "
             f"outlinks). This is a high-impact, low-effort connection."
@@ -499,7 +519,8 @@ def generate_link_recommendations(
         ),
         lambda w: (
             f"**{_short_path(w['url'])}** links to {w['outbound_count'] or 0} pages but "
-            f"only receives {w['inbound_count'] or 0} inbound links. It's giving away far "
+            f"{_inbound_phrase(w.get('inbound_count'), 'only_receives_N')}. "
+            f"It's giving away far "
             f"more authority than it receives. Audit its outbound links and remove "
             f"connections to non-essential pages like legal boilerplate, outdated content, "
             f"or redundant navigation."

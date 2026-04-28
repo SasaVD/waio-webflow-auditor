@@ -638,12 +638,29 @@ _ZERO_OUTBOUND_REWRITES = [
      "no outbound links"),
     (re.compile(r"\blinks to 0 pages\b", re.IGNORECASE),
      "has no outbound internal links"),
+    # Inbound variants — added in PDF v4 #2. Orphan templates BY DEFINITION
+    # produce 0-inbound recommendations (orphans are the trigger). Engine
+    # going forward uses _inbound_phrase(); these regex rewrites catch
+    # historical persisted recommendations until they get recomputed.
+    (re.compile(r"only receives 0 inbound links", re.IGNORECASE),
+     "doesn't receive any inbound links"),
+    (re.compile(r"with only 0 inbound links", re.IGNORECASE),
+     "with no inbound links"),
+    (re.compile(r"with just 0 internal links", re.IGNORECASE),
+     "with no internal links"),
+    (re.compile(r"\b0 inbound links means minimal equity flow\b", re.IGNORECASE),
+     "no inbound links means no equity flow"),
+    (re.compile(r"\b0 inbound links\b", re.IGNORECASE),
+     "no inbound links"),
+    (re.compile(r"\b0 internal links\b", re.IGNORECASE),
+     "no internal links"),
 ]
 
 
 def _rewrite_zero_outbound_phrases(text: str) -> str:
     """Rewrite awkward 'only 0 outbound' phrasings left by older TIPR engine
-    reason templates so they read naturally when outbound count is zero."""
+    reason templates so they read naturally when outbound count is zero.
+    Also covers inbound variants (orphan templates always hit 0-inbound)."""
     if not text:
         return text
     for pattern, replacement in _ZERO_OUTBOUND_REWRITES:
