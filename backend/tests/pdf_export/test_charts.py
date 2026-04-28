@@ -205,3 +205,80 @@ def test_content_gap_bar_rendered_per_card():
     assert "92%" in block
     assert "gap-bar" in block
     assert "width: 92" in block or "width:92" in block
+
+
+def _co_only_report(gap_score) -> dict:
+    """Minimal report with one Content Optimizer card carrying ``gap_score``.
+    Used by boundary-case tests below."""
+    base = _full_report()
+    base["content_optimizer"] = {
+        "analyses": {
+            "edge": {
+                "status": "ok",
+                "url": "https://example.com/edge",
+                "keyword": "edge case",
+                "result": {
+                    "summary": {
+                        "content_gap_score": gap_score,
+                        "recommendations_count": {"add": 0, "increase": 0, "reduce": 0, "remove": 0},
+                    },
+                    "terms": [],
+                },
+            }
+        }
+    }
+    return base
+
+
+def test_gap_bar_renders_for_zero_gap_score():
+    """gap_score=0 must still produce a track + bar pair (CSS min-width
+    floor keeps the bar visible). Locks against the 04-20 bug report
+    "Content Optimizer visual gap bars not rendering" — empirically the
+    bug no longer reproduces; this test prevents regression."""
+    html = _render_html(_co_only_report(0.0))
+    start = html.find("<!-- 7. CONTENT OPTIMIZER")
+    end = html.find("<!-- 8. TOPIC CLUSTERS")
+    block = html[start:end]
+    # The container track must be present
+    assert 'class="gap-bar-track"' in block
+    # And the bar with width: 0(.0)% (the min-width floor handles the visual)
+    assert 'class="gap-bar"' in block
+    assert "width: 0" in block  # matches "width: 0%" or "width: 0.0%"
+
+
+def test_gap_bar_renders_for_full_gap_score():
+    """gap_score=100 must produce width at the upper bound. The engine
+    emits floats via round(x, 1), so 100.0 renders as '100.0%' — accept
+    either int-formatted or float-formatted output as long as it's
+    bounded at 100."""
+    html = _render_html(_co_only_report(100.0))
+    start = html.find("<!-- 7. CONTENT OPTIMIZER")
+    end = html.find("<!-- 8. TOPIC CLUSTERS")
+    block = html[start:end]
+    assert "100.0%" in block or "100%" in block
+    assert "width: 100" in block
+
+
+def test_gap_bar_preserves_float_precision():
+    """gap_score=45.3 (typical post-`round(x, 1)` value from the engine)
+    must render as 'width: 45.3%' — not silently coerced to int. Catches
+    any regression where a future template change strips fractional
+    digits and produces visibly inaccurate bars."""
+    html = _render_html(_co_only_report(45.3))
+    start = html.find("<!-- 7. CONTENT OPTIMIZER")
+    end = html.find("<!-- 8. TOPIC CLUSTERS")
+    block = html[start:end]
+    assert "45.3%" in block
+    assert "width: 45.3" in block or "width:45.3" in block
+
+
+def test_gap_bar_track_and_bar_are_paired():
+    """Every card must emit BOTH a .gap-bar-track AND a .gap-bar — the
+    track without the bar would render as an empty gray rectangle (the
+    visual symptom from the original 04-20 report). Counts must match."""
+    html = _render_html(_full_report())
+    start = html.find("<!-- 7. CONTENT OPTIMIZER")
+    end = html.find("<!-- 8. TOPIC CLUSTERS")
+    block = html[start:end]
+    assert block.count('class="gap-bar-track"') == block.count('class="gap-bar"')
+    assert block.count('class="gap-bar"') >= 1
