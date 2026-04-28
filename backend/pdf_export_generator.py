@@ -919,14 +919,25 @@ _BRAND_STOPWORDS = {
 
 
 def _clean_brand_candidate(raw: str) -> str:
-    """Strip leading numbering, trailing punctuation, inline roles, etc."""
+    """Strip leading numbering, trailing punctuation, inline roles, etc.
+
+    Order matters: parenthetical descriptions are dropped BEFORE generic
+    char-strip, otherwise the char-strip removes the closing ')' as
+    punctuation and the parenthetical regex can't match. Whitespace is
+    collapsed at the end so 'Project  Scope' (double-space) compares
+    equal to 'Project Scope' against the stopword list.
+    """
     s = raw.strip()
     # Strip leading "1. ", "2. "
     s = re.sub(r"^\s*\d+[.)]\s+", "", s)
-    # Strip trailing punctuation and leading/trailing whitespace
-    s = s.strip(" -–—:;.,()[]")
-    # Drop trailing parenthetical descriptions
+    # Drop trailing parenthetical descriptions FIRST while parens are intact
     s = re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
+    # Then strip trailing punctuation and leading/trailing whitespace
+    s = s.strip(" -–—:;.,()[]")
+    # Collapse runs of internal whitespace to single space — "Project  Scope"
+    # → "Project Scope" so stopword comparison hits despite formatting
+    # variation in LLM output.
+    s = re.sub(r"\s+", " ", s)
     return s
 
 

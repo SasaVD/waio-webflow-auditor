@@ -172,6 +172,80 @@ def test_extract_discovery_brands_filters_two_word_purchase_phrases():
     assert "Huge" in {b["name"] for b in brands}
 
 
+def test_extract_discovery_brands_filters_project_scope_formatting_variants():
+    """B1.4 — 'Project scope' was reported as 'slipping through' the
+    competitor brand filter on 04-20. The phrase WAS already in the
+    stopword list, but two formatting bugs in _clean_brand_candidate
+    caused leaks:
+
+    1. Double-space between words ('Project  Scope') compared as
+       'project  scope' (two spaces) which doesn't match the single-space
+       stopword 'project scope'.
+    2. Parenthetical descriptions ('Project Scope (definition)') were
+       broken because the char-strip step removed ')' before the
+       parenthetical-trim regex could match.
+
+    Both fixed in the same commit (parenthetical-first ordering +
+    whitespace collapse). This test locks all known formatting variants
+    so future cleanups don't regress."""
+    engines = {
+        "chatgpt": {
+            "responses_by_prompt": {
+                "1": {
+                    "text": (
+                        "Selection factors: "
+                        "**Project Scope**, "
+                        "**Project scope**, "
+                        "**PROJECT SCOPE**, "
+                        "**Project scope:**, "
+                        "**Project Scope.**, "
+                        "**Project  Scope**, "  # double-space
+                        "** Project Scope **, "  # leading/trailing space
+                        "**1. Project Scope**, "  # numbered prefix
+                        "**Project Scope (definition)**. "  # parenthetical
+                        "Top picks: **Lounge Lizard**, **Huge**."
+                    )
+                }
+            }
+        }
+    }
+    brands = pdf_mod._extract_discovery_brands(engines, own_brand="Belt Creative")
+    names = {b["name"] for b in brands}
+    # No project-scope variant should survive
+    leaks = {n for n in names if "project" in n.lower() and "scope" in n.lower()}
+    assert not leaks, (
+        f"Project Scope variants leaked through filter: {leaks!r}"
+    )
+    # Real brands must still survive
+    assert "Lounge Lizard" in names
+    assert "Huge" in names
+
+
+def test_clean_brand_candidate_handles_formatting_variants():
+    """Direct unit test for _clean_brand_candidate. Locks the contract
+    that all 'Project Scope' variants normalize to 'Project Scope' /
+    'Project scope' / 'PROJECT SCOPE' (case preserved, whitespace
+    collapsed, punctuation/parenthetical stripped)."""
+    cases = [
+        ("Project Scope", "Project Scope"),
+        ("Project scope", "Project scope"),
+        ("PROJECT SCOPE", "PROJECT SCOPE"),
+        ("Project scope:", "Project scope"),
+        ("Project Scope.", "Project Scope"),
+        ("Project  Scope", "Project Scope"),         # double-space collapses
+        ("  Project Scope  ", "Project Scope"),      # outer whitespace
+        ("1. Project Scope", "Project Scope"),       # numbered prefix
+        ("Project Scope (definition)", "Project Scope"),  # parenthetical
+        ("Project Scope (multi word desc)", "Project Scope"),
+    ]
+    for raw, expected in cases:
+        out = pdf_mod._clean_brand_candidate(raw)
+        assert out == expected, f"_clean_brand_candidate({raw!r}) = {out!r}, expected {expected!r}"
+        assert out.lower() in pdf_mod._BRAND_STOPWORDS, (
+            f"Cleaned form {out!r} should be filtered by stopword set"
+        )
+
+
 def _render_html(report: dict) -> str:
     """Render just the template HTML (skip WeasyPrint) for fast assertion."""
     ctx = pdf_mod._prepare_context(report or {})
