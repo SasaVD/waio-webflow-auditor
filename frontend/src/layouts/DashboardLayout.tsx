@@ -356,7 +356,7 @@ export default function DashboardLayout() {
               <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-5 py-3.5 flex items-start gap-3">
                 <Loader2 size={18} className="text-indigo-600 animate-spin mt-0.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-indigo-900">Report enrichment in progress</p>
+                  <p className="text-sm font-semibold text-indigo-900">Site-wide analysis in progress</p>
                   <p className="text-xs text-indigo-700 mt-0.5">{enrichment.progress}</p>
                   <p className="text-xs text-indigo-500 mt-1">
                     Link graph, topic clusters, and crawl statistics are being generated...
@@ -380,7 +380,7 @@ export default function DashboardLayout() {
               <div className="bg-green-50 border border-green-200 rounded-xl px-5 py-3.5 flex items-center gap-3">
                 <CheckCircle2 size={18} className="text-green-600 flex-shrink-0" />
                 <p className="text-sm font-semibold text-green-900">
-                  Report enrichment complete! Refreshing data...
+                  Site-wide analysis complete — refreshing data...
                 </p>
               </div>
             </motion.div>
@@ -414,7 +414,7 @@ export default function DashboardLayout() {
                       : "The crawl ran past its time budget without producing usable data — most often a sign the target site's bot protection blocked our crawler. Link graph and topic clusters are not available for this audit."}
                   </p>
                   <p className="text-xs text-amber-700 mt-1.5">
-                    All other intelligence (TIPR, NLP, AI Visibility, Content Optimizer, executive summary) ran on the data we could collect.
+                    All other intelligence (link analysis, content intelligence, AI visibility, content optimizer, executive summary) ran on the data we could collect.
                   </p>
                   <button
                     onClick={() => enrichment.refreshNow()}
